@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- 2. ESTILO VISUAL (DARK MODE LIMPO) ---
+# --- 2. ESTILO VISUAL (DARK MODE + CORREÇÃO MOBILE) ---
 st.markdown("""
 <style>
     .stApp { background-color: #0e1117; color: #ffffff; }
@@ -28,13 +28,26 @@ st.markdown("""
         background-color: #218838; transform: scale(1.01);
     }
     
-    /* Caixas dos Números */
-    .metric-box { 
-        border: 2px solid #333; padding: 15px; border-radius: 10px; 
-        background: linear-gradient(180deg, #2b2b2b, #1a1a1a); 
-        text-align: center; margin-bottom: 10px;
+    /* Grade de Números (MOBILE FRIENDLY) */
+    .numbers-grid {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr); /* Força 5 colunas sempre */
+        gap: 10px;
+        margin-bottom: 20px;
     }
-    .metric-box h2 { margin: 0; color: #fff; font-size: 26px; font-weight: 800; }
+    
+    /* Caixas dos Números */
+    .number-box { 
+        border: 2px solid #333; 
+        padding: 10px 0; 
+        border-radius: 10px; 
+        background: linear-gradient(180deg, #2b2b2b, #1a1a1a); 
+        text-align: center; 
+        color: white;
+        font-weight: 800;
+        font-size: 24px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+    }
 
     /* Ajuste de Texto das Métricas */
     [data-testid="stMetricValue"] {
@@ -171,10 +184,17 @@ if df is not None:
 
             st.success("✨ ESTRATÉGIA MATEMÁTICA APLICADA!")
             
-            # GRID DE NÚMEROS
-            cols = st.columns(5)
-            for i, n in enumerate(palpite):
-                cols[i%5].markdown(f"<div class='metric-box'><h2>{n:02d}</h2></div>", unsafe_allow_html=True)
+            # --- GRID DE NÚMEROS (CORREÇÃO PARA CELULAR) ---
+            # Aqui montamos o HTML manualmente para garantir 5 colunas fixas
+            html_numeros = ""
+            for n in palpite:
+                html_numeros += f"<div class='number-box'>{n:02d}</div>"
+            
+            st.markdown(f"""
+            <div class='numbers-grid'>
+                {html_numeros}
+            </div>
+            """, unsafe_allow_html=True)
             
             st.markdown("---")
             
