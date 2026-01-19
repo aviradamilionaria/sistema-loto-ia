@@ -86,26 +86,32 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. MOTOR DE DADOS ---
+# --- 3. MOTOR DE DADOS BLINDADO (ATUALIZADO) ---
 @st.cache_data(ttl=3600)
 def baixar_dados_live():
+    # MUDANÇA IMPORTANTE: GitHub agora é a Fonte 1 (Mais estável e rápido nos EUA)
     FONTES = [
-        "https://loteriascaixa-api.herokuapp.com/api/lotofacil", 
-        "https://raw.githubusercontent.com/guilhermeasn/loteria.json/master/data/lotofacil.json", 
-        "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil" 
+        "https://raw.githubusercontent.com/guilhermeasn/loteria.json/master/data/lotofacil.json", # Fonte Global
+        "https://loteriascaixa-api.herokuapp.com/api/lotofacil", # Fonte Backup API
+        "https://servicebus2.caixa.gov.br/portaldeloterias/api/lotofacil" # Fonte Oficial (Instável nos EUA)
     ]
     
-    headers = {'User-Agent': 'Mozilla/5.0'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
 
     for url in FONTES:
         try:
-            response = requests.get(url, headers=headers, timeout=5, verify=False)
+            # Aumentei o timeout para 10 segundos para conexões lentas
+            response = requests.get(url, headers=headers, timeout=10, verify=False)
             if response.status_code == 200:
                 dados = response.json()
                 lista_final = []
                 for jogo in dados:
+                    # Normalização dos dados (API vs GitHub usam nomes diferentes)
                     dezenas = jogo.get('dezenas') or jogo.get('listaDezenas') or []
                     dezenas = [int(x) for x in dezenas]
+                    
                     if len(dezenas) == 15:
                         lista_final.append({
                             'Concurso': jogo['concurso'],
@@ -120,10 +126,12 @@ def baixar_dados_live():
                     df = pd.DataFrame(lista_final)
                     df = df.sort_values(by='Concurso', ascending=True).reset_index(drop=True)
                     return df
-        except: continue
+        except Exception as e:
+            continue # Se der erro, tenta o próximo silenciosamente
+            
     return None
 
-# --- 4. CÉREBRO MATEMÁTICO (Oculto) ---
+# --- 4. CÉREBRO MATEMÁTICO (RSI) ---
 def calcular_termometro(df):
     cols_numeros = [f'Num_{i}' for i in range(1, 26)]
     df_matriz = pd.DataFrame(0, index=df.index, columns=cols_numeros)
@@ -137,7 +145,7 @@ def calcular_termometro(df):
     analise = []
     for i in range(1, 26):
         serie = df_matriz[f'Num_{i}']
-        # RSI é usado internamente para medir "Temperatura" (0 a 100)
+        # RSI - Índice de Força Relativa (Termômetro)
         temperatura = ta.momentum.rsi(serie, window=14).iloc[-1]
         
         if serie.iloc[-1] == 0:
@@ -151,16 +159,16 @@ def calcular_termometro(df):
         
     return pd.DataFrame(analise)
 
-# --- 5. INTERFACE (O SEU SISTEMA) ---
+# --- 5. INTERFACE DO USUÁRIO ---
 st.title("🍀 LotoQuant | IA Profissional")
 st.caption("Sistema de Análise Estatística & Probabilidade Geométrica")
 
-with st.spinner('Conectando ao banco de dados da Caixa...'):
+with st.spinner('Sincronizando banco de dados global...'):
     df = baixar_dados_live()
 
 if df is not None:
     ultimo_conc = df['Concurso'].iloc[-1]
-    st.info(f"✅ Base de Dados Atualizada. Último Concurso: **{ultimo_conc}**")
+    st.info(f"✅ Conexão Estável. Base Atualizada até: **Concurso {ultimo_conc}**")
     
     col_a, col_b, col_c = st.columns([1, 2, 1])
     with col_b:
@@ -168,7 +176,7 @@ if df is not None:
             df_stats = calcular_termometro(df)
             df_sorted = df_stats.sort_values(by='Temp')
             
-            # Estratégia: Equilíbrio (Frios + Neutros + Quentes)
+            # Estratégia Sniper: Frios + Neutros + Quentes
             frios = df_sorted.head(5)['Bola'].tolist()
             quentes = df_sorted.tail(5)['Bola'].tolist()
             meio = len(df_sorted) // 2
@@ -176,7 +184,7 @@ if df is not None:
             
             palpite = sorted(list(set(frios + neutros + quentes)))
             
-            # Garante 15 números
+            # Correção de segurança (garante 15 dezenas)
             if len(palpite) < 15:
                 faltam = 15 - len(palpite)
                 extras = df_sorted.iloc[5:5+faltam]['Bola'].tolist()
@@ -184,8 +192,7 @@ if df is not None:
 
             st.success("✨ ESTRATÉGIA MATEMÁTICA APLICADA!")
             
-            # --- GRID DE NÚMEROS (CORREÇÃO PARA CELULAR) ---
-            # Aqui montamos o HTML manualmente para garantir 5 colunas fixas
+            # --- GRID DE NÚMEROS (Visualização Mobile) ---
             html_numeros = ""
             for n in palpite:
                 html_numeros += f"<div class='number-box'>{n:02d}</div>"
@@ -198,14 +205,14 @@ if df is not None:
             
             st.markdown("---")
             
-            # --- ANÁLISE DO JOGO ---
+            # --- ANÁLISE TÉCNICA DO JOGO ---
             pares = len([x for x in palpite if x % 2 == 0])
             impares = 15 - pares
             soma = sum(palpite)
             
-            # Filtros Clássicos da Lotofácil
+            # Listas de Padrões
             primos_lista = [2, 3, 5, 7, 11, 13, 17, 19, 23]
-            fibo_lista = [1, 2, 3, 5, 8, 13, 21] # A tal "Sequência Mágica"
+            fibo_lista = [1, 2, 3, 5, 8, 13, 21] 
             moldura_lista = [1, 2, 3, 4, 5, 6, 10, 11, 15, 16, 20, 21, 22, 23, 24, 25]
             
             qtd_primos = len([x for x in palpite if x in primos_lista])
@@ -219,40 +226,42 @@ if df is not None:
             # Status da Soma
             if soma < 180: status_soma = "Baixa"
             elif soma > 220: status_soma = "Alta"
-            else: status_soma = "Ideal (Padrão)"
+            else: status_soma = "Ideal"
 
-            # --- PAINEL DE CONTROLE (Traduzido para Loteria) ---
+            # Painel de Métricas
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Par / Ímpar", f"{pares} / {impares}", help="O padrão mais forte é 7 Pares e 8 Ímpares (ou vice-versa).")
-            c2.metric("Soma das Dezenas", f"{soma} ({status_soma})", help="Soma de todos os números. O ideal é entre 180 e 220.")
-            c3.metric("Repetidos", repetidos, help="Números que saíram no concurso passado.")
-            c4.metric("Primos", qtd_primos, help="Números Primos: 2, 3, 5, 7, 11, 13, 17, 19, 23.")
+            c1.metric("Par / Ímpar", f"{pares} / {impares}", help="Equilíbrio ideal: 7/8 ou 8/7")
+            c2.metric("Soma", f"{soma}", help="Soma total das dezenas")
+            c3.metric("Repetidos", repetidos, help="Dezenas que repetiram do último concurso")
+            c4.metric("Primos", qtd_primos, help="Quantidade de números Primos")
             
-            # --- RELATÓRIO DO ALGORITMO (SEM TERMOS DE FOREX) ---
+            # --- RELATÓRIO DO ALGORITMO ---
             st.markdown(f"""
             <div class='report-box'>
                 <span class='report-title'>🧠 Auditoria do Jogo Gerado:</span>
-                O sistema analisou os últimos <strong>{len(df)} sorteios</strong> e montou este jogo com base em Probabilidade Pura:
+                O sistema processou <strong>{len(df)} sorteios</strong> e identificou as seguintes oportunidades:
                 <br><br>
                 <ul style="list-style-type: none; padding: 0; margin: 0;">
-                    <li>🔥 <strong>Memória do Sorteio:</strong> Mantivemos <span class="tag">{repetidos} números</span> do último concurso (A tendência é repetir entre 8 e 10).</li>
-                    <li>📐 <strong>Geometria do Volante:</strong>
+                    <li>🔥 <strong>Memória Recente:</strong> O jogo manteve <span class="tag">{repetidos} números</span> do último concurso para respeitar a tendência de repetição.</li>
+                    <li>📐 <strong>Estrutura Geométrica:</strong>
                         <ul>
-                            <li>Números na Moldura: <strong>{qtd_moldura}</strong> (O ideal é 9 ou 10).</li>
-                            <li>Sequência Mágica (Fibonacci): <strong>{qtd_fibo}</strong> números (1, 2, 3, 5, 8, 13, 21).</li>
+                            <li>Na Moldura: <strong>{qtd_moldura}</strong> dezenas (Ocupação das bordas).</li>
+                            <li>Sequência Mágica: <strong>{qtd_fibo}</strong> números Fibonacci.</li>
                         </ul>
                     </li>
-                    <li>⚖️ <strong>Lei do Equilíbrio:</strong> O algoritmo misturou números que estão saindo muito ("Quentes") com números que estão atrasados ("Frios") para cercar as duas possibilidades.</li>
-                    <li>✅ <strong>Conclusão:</strong> Jogo tecnicamente balanceado dentro das estatísticas da Caixa.</li>
+                    <li>⚖️ <strong>Lei do Equilíbrio:</strong> Utilizamos o RSI para misturar dezenas quentes com as atrasadas, buscando o ponto de virada estatística.</li>
+                    <li>✅ <strong>Conclusão:</strong> Jogo tecnicamente balanceado e pronto para aposta.</li>
                 </ul>
             </div>
             """, unsafe_allow_html=True)
             
-            # Copiar Jogo
+            # Texto para Copiar
             msg = f"Jogo LotoQuant: {palpite}"
             st.code(msg, language="text")
             
 else:
-    st.error("⚠️ Sem conexão com a Caixa. Verifique sua internet.")
-    if st.button("Tentar Novamente"):
+    # Mensagem de erro mais amigável com botão de tentar de novo
+    st.error("⚠️ Conexão instável com a Caixa Econômica. O servidor nos EUA foi bloqueado temporariamente.")
+    st.markdown("**Solução:** Clique no botão abaixo para tentar usar a rota de backup.")
+    if st.button("🔄 Tentar Reconectar"):
         st.rerun()
