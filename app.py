@@ -6,20 +6,17 @@ import numpy as np
 import re
 from io import StringIO
 
-# --- 1. CONFIGURAÇÃO (CORRIGIDA PARA EXIBIR BARRA LATERAL) ---
+# --- 1. CONFIGURAÇÃO (VISUAL ESTÁVEL) ---
 st.set_page_config(
-    page_title="LotoQuant | GRAND MASTER V6.1",
+    page_title="LotoQuant | PRO V6.2",
     page_icon="🦅",
     layout="wide",
-    initial_sidebar_state="expanded" # Garante que a barra lateral apareça
+    initial_sidebar_state="expanded"
 )
 
-# --- 2. CSS LIMPO (PARA NÃO BUGAR TEXTO) ---
 st.markdown("""
 <style>
     .stApp { background-color: #050505; color: #e0e0e0; }
-    
-    /* Botão Principal */
     .stButton>button { 
         background: linear-gradient(180deg, #00ff88 0%, #00b360 100%);
         color: #000; border: none; border-radius: 6px;
@@ -27,41 +24,16 @@ st.markdown("""
         text-transform: uppercase; box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
     }
     .stButton>button:hover { transform: scale(1.01); }
-    
-    /* Card do Jogo */
-    .game-card {
-        background: #0f1216; border: 1px solid #1f242d;
-        border-radius: 12px; padding: 20px; margin-bottom: 25px;
-    }
-    
-    /* Texto da IA (Simplificado para não quebrar) */
-    .ai-box {
-        background-color: #1c2128; 
-        border-left: 5px solid #a371f7;
-        padding: 15px; 
-        margin: 15px 0;
-        border-radius: 4px;
-        color: #d0d7de;
-        font-family: sans-serif;
-    }
-    
-    /* Grade de Bolas */
+    .game-card { background: #0f1216; border: 1px solid #1f242d; border-radius: 12px; padding: 20px; margin-bottom: 25px; }
+    .ai-box { background-color: #1c2128; border-left: 5px solid #a371f7; padding: 15px; margin: 15px 0; border-radius: 4px; color: #d0d7de; font-family: sans-serif; font-size: 14px; }
     .numbers-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top:10px;}
-    .number-box { 
-        background: #0d1117; border: 2px solid #30363d; 
-        color: #fff; border-radius: 50%; aspect-ratio: 1;
-        display: flex; align-items: center; justify-content: center;
-        font-weight: bold; font-size: 18px;
-    }
-    
-    /* Cores Especiais */
-    .fixa { border-color: #a371f7 !important; color: #a371f7 !important; } /* Ciclo */
-    .repetida { border-color: #3fb950 !important; color: #3fb950 !important; } /* Repetida */
-
+    .number-box { background: #0d1117; border: 2px solid #30363d; color: #fff; border-radius: 50%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; }
+    .fixa { border-color: #a371f7 !important; color: #a371f7 !important; }
+    .repetida { border-color: #3fb950 !important; color: #3fb950 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. DADOS ---
+# --- 2. DADOS ---
 @st.cache_data(ttl=300)
 def baixar_dados_live():
     FONTES = [
@@ -85,7 +57,7 @@ def baixar_dados_live():
         except: continue
     return None
 
-# --- 4. CÁLCULOS ---
+# --- 3. CÁLCULOS ---
 def analisar_ciclo(df):
     todos = set(range(1, 26))
     acumulado = set()
@@ -107,47 +79,64 @@ def calcular_rsi(df):
         stats.append({'Bola': i, 'RSI': rsi})
     return pd.DataFrame(stats)
 
+# --- 4. GERADOR COM NARRATIVA DINÂMICA (NOVO) ---
 def gerar_jogos(df_stats, ultimas, ciclo):
     jogos = []
     quentes = df_stats.sort_values('RSI', ascending=False).head(12)['Bola'].tolist()
     frios = df_stats.sort_values('RSI', ascending=True).head(8)['Bola'].tolist()
     neutros = [x for x in range(1,26) if x not in quentes and x not in frios]
     
-    # JOGO 1
+    # JOGO 1: SNIPER (CICLO)
     base1 = list(ciclo)
-    txt1 = f"🎯 SNIPER: Ciclo Aberto. Fixei {ciclo}." if ciclo else "🎯 SNIPER: Modo Estatística Pura."
-    base1 += [x for x in quentes if x in ultimas and x not in base1]
+    usou_ciclo = list(ciclo)
+    
+    # Pega quentes repetidas para dar base
+    fortes = [x for x in quentes if x in ultimas and x not in base1]
+    base1 += fortes[:6] # Pega top 6 fortes
+    
+    # Completa
     while len(base1) < 15: base1.append([x for x in (quentes+neutros) if x not in base1][0])
+    
+    # Narrativa J1
+    if usou_ciclo:
+        txt1 = f"🎯 <b>MOTIVO:</b> Fixei obrigatoriamente <b>{usou_ciclo}</b> para fechar o Ciclo. Usei <b>{fortes[:3]}</b> como base forte (Repetidas)."
+    else:
+        txt1 = f"🎯 <b>MOTIVO:</b> Ciclo fechado. Foquei na 'Estatística Pura' usando os mais fortes: <b>{base1[:4]}</b>."
+        
     jogos.append({"Titulo": "JOGO 1: SNIPER", "Numeros": sorted(base1[:15]), "Razao": txt1, "Tipo": "Principal"})
     
-    # JOGO 2
+    # JOGO 2: TENDÊNCIA (EVITA O CICLO SE POSSIVEL PARA VARIAR)
     base2 = quentes[:10] + neutros[:5]
     while len(base2) < 15: base2.append([x for x in range(1,26) if x not in base2][0])
-    jogos.append({"Titulo": "JOGO 2: TENDÊNCIA", "Numeros": sorted(base2[:15]), "Razao": "🌊 SURFISTA: Focado apenas nos números quentes (RSI Alto).", "Tipo": "Ataque"})
     
-    # JOGO 3
+    # Narrativa J2
+    top_q = sorted(list(set(base2) & set(quentes[:5])))
+    txt2 = f"🌊 <b>MOTIVO:</b> Ignorei zebras. Selecionei <b>{top_q}</b> pois estão 'fervendo' (RSI Alto). É o jogo da lógica."
+    jogos.append({"Titulo": "JOGO 2: TENDÊNCIA", "Numeros": sorted(base2[:15]), "Razao": txt2, "Tipo": "Ataque"})
+    
+    # JOGO 3: PROTEÇÃO (COLD)
     base3 = frios[:7] + neutros[:6] + quentes[:2]
-    jogos.append({"Titulo": "JOGO 3: PROTEÇÃO", "Numeros": sorted(base3[:15]), "Razao": "🛡️ HEDGE: Focado em zebras e números frios.", "Tipo": "Defesa"})
+    
+    # Narrativa J3
+    top_f = sorted(list(set(base3) & set(frios[:5])))
+    txt3 = f"🛡️ <b>MOTIVO:</b> Apostei na 'Lei do Retorno'. Os números <b>{top_f}</b> estão muito atrasados e podem surpreender hoje."
+    jogos.append({"Titulo": "JOGO 3: PROTEÇÃO", "Numeros": sorted(base3[:15]), "Razao": txt3, "Tipo": "Defesa"})
     
     return jogos
 
 # --- 5. INTERFACE ---
-# --- BARRA LATERAL (CONFERIDOR) ---
 st.sidebar.markdown("## 🧮 CARTEIRA DIGITAL")
-st.sidebar.info("Carregue o arquivo para conferir:")
-uploaded_file = st.sidebar.file_uploader("📂 Carregar 'MeusJogos.txt'", type="txt")
+uploaded_file = st.sidebar.file_uploader("📂 Carregar Arquivo", type="txt")
+manual_input = st.sidebar.text_area("Ou digite (Ex: 01 02...):", height=80)
 
-# Modo Manual (Sempre visível como opção)
-manual_input = st.sidebar.text_area("Ou digite (Ex: 01 02 03...):", height=80)
-
-with st.spinner('Conectando...'):
+with st.spinner('Analisando Matemática...'):
     df = baixar_dados_live()
 
 if df is not None:
     ult = df.iloc[-1]
     dezenas_ult = ult['Dezenas']
     
-    # LÓGICA DO CONFERIDOR
+    # CONFERIDOR
     jogos_check = []
     if uploaded_file:
         stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
@@ -171,21 +160,18 @@ if df is not None:
             total += premio
             cor = "#00ff88" if acertos >= 11 else "#30363d"
             st.sidebar.markdown(f"<div style='border-left:4px solid {cor}; padding:5px; margin-bottom:5px;'>Jogo {i+1}: <b>{acertos} pts</b></div>", unsafe_allow_html=True)
-        
         if total > 0: st.sidebar.success(f"💰 PRÊMIO: R$ {total},00")
         else: st.sidebar.warning("Sem prêmio.")
 
-    # --- TELA PRINCIPAL ---
-    st.title("🦅 LOTOQUANT | V6.1")
+    # TELA PRINCIPAL
+    st.title("🦅 LOTOQUANT | PRO V6.2")
     st.caption(f"Concurso Atual: {ult['Concurso']}")
     
     ciclo = analisar_ciclo(df)
-    if ciclo:
-        st.warning(f"⚠️ CICLO ABERTO: Faltam {ciclo}")
-    else:
-        st.success("✅ Ciclo Fechado.")
+    if ciclo: st.warning(f"⚠️ CICLO ABERTO: Faltam {ciclo}")
+    else: st.success("✅ Ciclo Fechado.")
         
-    if st.button("🚀 GERAR JOGOS"):
+    if st.button("🚀 GERAR JOGOS EXPLICADOS"):
         stats = calcular_rsi(df)
         jogos = gerar_jogos(stats, dezenas_ult, ciclo)
         
@@ -194,7 +180,6 @@ if df is not None:
         for jogo in jogos:
             nums = jogo['Numeros']
             txt_out += f"{jogo['Titulo']}: {nums}\n"
-            
             rep = len(set(nums) & set(dezenas_ult))
             
             with st.container():
