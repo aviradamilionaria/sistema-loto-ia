@@ -6,9 +6,9 @@ import numpy as np
 import re
 from io import StringIO
 
-# --- 1. CONFIGURAÇÃO (VISUAL ESTÁVEL) ---
+# --- 1. CONFIGURAÇÃO ---
 st.set_page_config(
-    page_title="LotoQuant | PRO V6.2",
+    page_title="LotoQuant | PRO V6.3 (HEDGE REAL)",
     page_icon="🦅",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -30,6 +30,7 @@ st.markdown("""
     .number-box { background: #0d1117; border: 2px solid #30363d; color: #fff; border-radius: 50%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; }
     .fixa { border-color: #a371f7 !important; color: #a371f7 !important; }
     .repetida { border-color: #3fb950 !important; color: #3fb950 !important; }
+    .proibida { text-decoration: line-through; color: #ff4b4b; } /* Estilo para explicar exclusão */
 </style>
 """, unsafe_allow_html=True)
 
@@ -79,48 +80,62 @@ def calcular_rsi(df):
         stats.append({'Bola': i, 'RSI': rsi})
     return pd.DataFrame(stats)
 
-# --- 4. GERADOR COM NARRATIVA DINÂMICA (NOVO) ---
+# --- 4. GERADOR INTELIGENTE COM CONTRA-CICLO ---
 def gerar_jogos(df_stats, ultimas, ciclo):
     jogos = []
     quentes = df_stats.sort_values('RSI', ascending=False).head(12)['Bola'].tolist()
     frios = df_stats.sort_values('RSI', ascending=True).head(8)['Bola'].tolist()
     neutros = [x for x in range(1,26) if x not in quentes and x not in frios]
     
-    # JOGO 1: SNIPER (CICLO)
+    # --- JOGO 1: APOSTA NO CICLO (LÓGICA) ---
     base1 = list(ciclo)
     usou_ciclo = list(ciclo)
-    
-    # Pega quentes repetidas para dar base
     fortes = [x for x in quentes if x in ultimas and x not in base1]
-    base1 += fortes[:6] # Pega top 6 fortes
-    
-    # Completa
+    base1 += fortes[:6]
     while len(base1) < 15: base1.append([x for x in (quentes+neutros) if x not in base1][0])
     
-    # Narrativa J1
     if usou_ciclo:
-        txt1 = f"🎯 <b>MOTIVO:</b> Fixei obrigatoriamente <b>{usou_ciclo}</b> para fechar o Ciclo. Usei <b>{fortes[:3]}</b> como base forte (Repetidas)."
+        txt1 = f"🎯 <b>MOTIVO:</b> APOSTA A FAVOR DO CICLO. Fixei <b>{usou_ciclo}</b> pois a estatística diz que devem sair hoje."
     else:
-        txt1 = f"🎯 <b>MOTIVO:</b> Ciclo fechado. Foquei na 'Estatística Pura' usando os mais fortes: <b>{base1[:4]}</b>."
+        txt1 = f"🎯 <b>MOTIVO:</b> Ciclo fechado. Segui a lógica pura dos números mais fortes."
         
-    jogos.append({"Titulo": "JOGO 1: SNIPER", "Numeros": sorted(base1[:15]), "Razao": txt1, "Tipo": "Principal"})
+    jogos.append({"Titulo": "JOGO 1: SNIPER (LÓGICA)", "Numeros": sorted(base1[:15]), "Razao": txt1, "Tipo": "Principal"})
     
-    # JOGO 2: TENDÊNCIA (EVITA O CICLO SE POSSIVEL PARA VARIAR)
+    # --- JOGO 2: TENDÊNCIA (MISTO) ---
+    # Tenta usar o ciclo, mas prioriza força RSI.
     base2 = quentes[:10] + neutros[:5]
+    # Se sobrar espaço e tiver ciclo, coloca
+    for c in ciclo:
+        if c not in base2 and len(base2) < 15: base2.append(c)
+    
     while len(base2) < 15: base2.append([x for x in range(1,26) if x not in base2][0])
     
-    # Narrativa J2
-    top_q = sorted(list(set(base2) & set(quentes[:5])))
-    txt2 = f"🌊 <b>MOTIVO:</b> Ignorei zebras. Selecionei <b>{top_q}</b> pois estão 'fervendo' (RSI Alto). É o jogo da lógica."
+    txt2 = f"🌊 <b>MOTIVO:</b> Surfista de Tendência. Priorizei números com RSI alto (Quentes), independente do atraso."
     jogos.append({"Titulo": "JOGO 2: TENDÊNCIA", "Numeros": sorted(base2[:15]), "Razao": txt2, "Tipo": "Ataque"})
     
-    # JOGO 3: PROTEÇÃO (COLD)
-    base3 = frios[:7] + neutros[:6] + quentes[:2]
+    # --- JOGO 3: HEDGE REAL (CONTRA O CICLO) ---
+    # AQUI ESTÁ A MUDANÇA: PROIBIR OS NÚMEROS DO CICLO
+    base3 = []
     
-    # Narrativa J3
-    top_f = sorted(list(set(base3) & set(frios[:5])))
-    txt3 = f"🛡️ <b>MOTIVO:</b> Apostei na 'Lei do Retorno'. Os números <b>{top_f}</b> estão muito atrasados e podem surpreender hoje."
-    jogos.append({"Titulo": "JOGO 3: PROTEÇÃO", "Numeros": sorted(base3[:15]), "Razao": txt3, "Tipo": "Defesa"})
+    # Lista de proibidos (Números do Ciclo)
+    proibidos = ciclo
+    
+    # Pega Frios e Neutros que NÃO ESTÃO no ciclo
+    pool_seguro = [x for x in (frios + neutros + quentes) if x not in proibidos]
+    
+    # Monta o jogo só com quem SOBROU (aposta na falha do ciclo)
+    base3 = pool_seguro[:15]
+    
+    # Se faltar número (caso raro onde o ciclo é enorme), completa com o que tem
+    if len(base3) < 15:
+        falta = 15 - len(base3)
+        base3 += proibidos[:falta] # Só usa se não tiver opção
+        txt_exclusao = "Tentei excluir o ciclo, mas faltaram números."
+    else:
+        txt_exclusao = f"🚫 <b>PROIBI AS DEZENAS {proibidos}.</b>"
+
+    txt3 = f"🛡️ <b>MOTIVO:</b> HEDGE REAL (CONTRA-CICLO). {txt_exclusao}<br>Se o número do ciclo (ex: 16) falhar de novo, este é o único jogo que vai premiar."
+    jogos.append({"Titulo": "JOGO 3: PROTEÇÃO TOTAL", "Numeros": sorted(base3[:15]), "Razao": txt3, "Tipo": "Defesa"})
     
     return jogos
 
@@ -129,7 +144,7 @@ st.sidebar.markdown("## 🧮 CARTEIRA DIGITAL")
 uploaded_file = st.sidebar.file_uploader("📂 Carregar Arquivo", type="txt")
 manual_input = st.sidebar.text_area("Ou digite (Ex: 01 02...):", height=80)
 
-with st.spinner('Analisando Matemática...'):
+with st.spinner('Calculando Hedge de Proteção...'):
     df = baixar_dados_live()
 
 if df is not None:
@@ -164,14 +179,14 @@ if df is not None:
         else: st.sidebar.warning("Sem prêmio.")
 
     # TELA PRINCIPAL
-    st.title("🦅 LOTOQUANT | PRO V6.2")
-    st.caption(f"Concurso Atual: {ult['Concurso']}")
+    st.title("🦅 LOTOQUANT | PRO V6.3")
+    st.caption(f"Concurso Atual: {ult['Concurso']} | Modo Hedge Ativado")
     
     ciclo = analisar_ciclo(df)
-    if ciclo: st.warning(f"⚠️ CICLO ABERTO: Faltam {ciclo}")
+    if ciclo: st.warning(f"⚠️ CICLO ABERTO: {ciclo}")
     else: st.success("✅ Ciclo Fechado.")
         
-    if st.button("🚀 GERAR JOGOS EXPLICADOS"):
+    if st.button("🚀 GERAR ESTRATÉGIA HEDGE"):
         stats = calcular_rsi(df)
         jogos = gerar_jogos(stats, dezenas_ult, ciclo)
         
