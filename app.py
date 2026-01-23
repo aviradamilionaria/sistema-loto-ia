@@ -6,9 +6,9 @@ import numpy as np
 import re
 from io import StringIO
 
-# --- 1. CONFIGURAÇÃO (VISUAL ULTIMATE) ---
+# --- 1. CONFIGURAÇÃO ---
 st.set_page_config(
-    page_title="LotoQuant | ULTIMATE V8.1",
+    page_title="LotoQuant | SYSTEM V8.2",
     page_icon="🧿",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -42,6 +42,7 @@ st.markdown("""
     
     .fixa { border-color: #a371f7 !important; color: #a371f7 !important; box-shadow: 0 0 10px rgba(163, 113, 247, 0.2); }
     .repetida { border-color: #238636 !important; color: #3fb950 !important; }
+    .alerta { border-color: #d29922 !important; color: #d29922 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -69,7 +70,7 @@ def baixar_dados_live():
         except: continue
     return None
 
-# --- 3. CÁLCULOS AVANÇADOS ---
+# --- 3. CÁLCULOS ---
 def analisar_ciclo(df):
     todos = set(range(1, 26))
     acumulado = set()
@@ -101,7 +102,7 @@ def calcular_rsi(df):
         stats.append({'Bola': i, 'RSI': rsi})
     return pd.DataFrame(stats)
 
-# --- 4. GERADOR ULTIMATE (COM FILTRO DE SOMA) ---
+# --- 4. GERADOR COM MODO DE SEGURANÇA ---
 def gerar_jogos_ultimate(df_stats, ultimas, ciclo, atrasos):
     jogos = []
     quentes = df_stats.sort_values('RSI', ascending=False)['Bola'].tolist()
@@ -109,16 +110,16 @@ def gerar_jogos_ultimate(df_stats, ultimas, ciclo, atrasos):
     atrasados_criticos = sorted(atrasados_criticos, key=lambda x: atrasos[x], reverse=True)
     
     # === JOGO 1: SNIPER (Lógica Pura) ===
+    base1_final = []
     tentativas = 0
-    while tentativas < 2000:
-        base1 = list(set(ciclo + atrasados_criticos)) # Fixa Obrigatórios
-        
-        # Preenchimento
-        pool = [x for x in quentes if x not in base1 and x in ultimas] # Prioriza repetidas quentes
+    sucesso = False
+    
+    # Loop de Tentativa Perfeita (Soma + Repetidas)
+    while tentativas < 3000:
+        base1 = list(set(ciclo + atrasados_criticos)) 
+        pool = [x for x in quentes if x not in base1 and x in ultimas]
         np.random.shuffle(pool)
         base1 += pool
-        
-        # Completa se faltar
         if len(base1) < 15:
             rest = [x for x in range(1,26) if x not in base1]
             np.random.shuffle(rest)
@@ -128,20 +129,26 @@ def gerar_jogos_ultimate(df_stats, ultimas, ciclo, atrasos):
         rep = len(set(base1) & set(ultimas))
         soma = sum(base1)
         
-        # FILTROS DE FERRO:
-        # 1. Repetidas: 8 a 10
-        # 2. Soma: 180 a 220 (Padrão Ouro)
         if (8 <= rep <= 10) and (180 <= soma <= 220):
-            txt1 = f"🎯 <b>ESTRATÉGIA:</b> Fixei os atrasados <b>{atrasados_criticos}</b>. Filtrei para ter <b>{rep} repetidas</b> e Soma <b>{soma}</b> (Zona Ideal)."
-            jogos.append({"Titulo": "JOGO 1: SNIPER (LÓGICA)", "Numeros": base1, "Razao": txt1, "Tag": "ATAQUE"})
+            base1_final = base1
+            txt1 = f"🎯 <b>ESTRATÉGIA:</b> Fixei os atrasados <b>{atrasados_criticos}</b>. Filtro PERFEITO: <b>{rep} repetidas</b> e Soma <b>{soma}</b>."
+            jogos.append({"Titulo": "JOGO 1: SNIPER (LÓGICA)", "Numeros": base1_final, "Razao": txt1, "Tag": "ATAQUE"})
+            sucesso = True
             break
         tentativas += 1
-        
+    
+    # MODO DE SEGURANÇA (Se falhou o loop)
+    if not sucesso:
+        # Gera apenas com foco em Repetidas (Ignora Soma para não travar)
+        base1_final = sorted(base1[:15]) # Pega a última tentativa
+        txt1 = f"⚠️ <b>MODO DE SEGURANÇA:</b> O filtro de Soma estava muito rígido. Gereio o jogo focado em <b>Repetidas ({len(set(base1_final)&set(ultimas))})</b> e Atrasados."
+        jogos.append({"Titulo": "JOGO 1: SNIPER (MODO SEGURO)", "Numeros": base1_final, "Razao": txt1, "Tag": "ATAQUE"})
+
     # === JOGO 2: VARIAÇÃO ===
     tentativas = 0
-    while tentativas < 2000:
-        base2 = [atrasados_criticos[0]] if atrasados_criticos else [] # Mantém só o líder (16)
-        
+    sucesso = False
+    while tentativas < 3000:
+        base2 = [atrasados_criticos[0]] if atrasados_criticos else [] 
         pool = quentes[:18]
         np.random.shuffle(pool)
         for n in pool:
@@ -151,21 +158,34 @@ def gerar_jogos_ultimate(df_stats, ultimas, ciclo, atrasos):
         rep = len(set(base2) & set(ultimas))
         soma = sum(base2)
         
-        if (8 <= rep <= 11) and (175 <= soma <= 225) and base2 != jogos[0]['Numeros']:
-            txt2 = f"⚖️ <b>ESTRATÉGIA:</b> Mantive o <b>{atrasados_criticos[0]}</b> mas variei o resto com RSI Alto. Soma calibrada em <b>{soma}</b>."
+        # Verifica se não é igual ao Jogo 1
+        diferente = base2 != jogos[0]['Numeros']
+        
+        if (8 <= rep <= 11) and (175 <= soma <= 225) and diferente:
+            txt2 = f"⚖️ <b>ESTRATÉGIA:</b> Mantive o <b>{atrasados_criticos[0]}</b> mas variei o resto. Soma calibrada em <b>{soma}</b>."
             jogos.append({"Titulo": "JOGO 2: EQUILÍBRIO", "Numeros": base2, "Razao": txt2, "Tag": "MISTO"})
+            sucesso = True
             break
         tentativas += 1
         
+    if not sucesso:
+        # Fallback Jogo 2
+        txt2 = "⚠️ <b>MODO DE SEGURANÇA:</b> Variação gerada sem filtro de Soma para garantir o jogo."
+        jogos.append({"Titulo": "JOGO 2: EQUILÍBRIO (MODO SEGURO)", "Numeros": base2, "Razao": txt2, "Tag": "MISTO"})
+
     # === JOGO 3: HEDGE (CONTRA-CICLO) ===
+    # Este é mais fácil de gerar, raramente trava
     excluidos = set(ciclo + atrasados_criticos)
     pool_seguro = [x for x in range(1,26) if x not in excluidos]
     
     tentativas = 0
+    base3 = []
+    sucesso = False
+    
     while tentativas < 2000:
         np.random.shuffle(pool_seguro)
         base3 = sorted(pool_seguro[:15])
-        if len(base3) < 15: # Fallback
+        if len(base3) < 15: 
             rest = list(excluidos)
             np.random.shuffle(rest)
             base3 += rest[:(15-len(base3))]
@@ -173,11 +193,15 @@ def gerar_jogos_ultimate(df_stats, ultimas, ciclo, atrasos):
             
         rep = len(set(base3) & set(ultimas))
         
-        if 6 <= rep <= 9: # Zebra aceita soma livre
+        if 6 <= rep <= 10: 
             txt3 = f"🛡️ <b>ESTRATÉGIA:</b> Excluí propositalmente <b>{list(excluidos)}</b>. Se o atrasado falhar, aqui está sua proteção."
             jogos.append({"Titulo": "JOGO 3: ANTI-SISTEMA", "Numeros": base3, "Razao": txt3, "Tag": "DEFESA"})
+            sucesso = True
             break
         tentativas += 1
+        
+    if not sucesso:
+         jogos.append({"Titulo": "JOGO 3: ANTI-SISTEMA", "Numeros": base3, "Razao": "Modo de segurança ativado para garantir o jogo.", "Tag": "DEFESA"})
 
     return jogos
 
@@ -186,7 +210,7 @@ st.sidebar.markdown("## 🧮 CARTEIRA")
 uploaded_file = st.sidebar.file_uploader("📂 Carregar Arquivo", type="txt")
 manual_input = st.sidebar.text_area("Digitar jogo:", height=80)
 
-with st.spinner('Auditando Estatísticas...'):
+with st.spinner('Calibrando Filtros...'):
     df = baixar_dados_live()
 
 if df is not None:
@@ -221,14 +245,14 @@ if df is not None:
         else: st.sidebar.warning("Sem prêmio.")
 
     # TELA PRINCIPAL
-    st.title("🧿 LOTOQUANT | ULTIMATE V8.1")
-    st.caption(f"Concurso: {ult['Concurso']} | Filtro de Soma: ATIVO (180-220)")
+    st.title("🧿 LOTOQUANT | SYSTEM V8.2")
+    st.caption(f"Concurso: {ult['Concurso']} | Sistema Anti-Travamento: ATIVO")
     
     ciclo = analisar_ciclo(df)
     atrasos = calcular_atrasos(df)
     criticos = [k for k,v in atrasos.items() if v >= 2]
     
-    # PAINEL DE ESPIONAGEM (AQUI VOCÊ VÊ A VERDADE)
+    # PAINEL ESPIONAGEM
     st.markdown("### 📊 RAIO-X DO SORTEIO")
     st.markdown(f"""
     <div class='info-panel'>
@@ -271,8 +295,8 @@ if df is not None:
                 html_bolas = ""
                 for n in nums:
                     css = ""
-                    if n in criticos: css = "fixa" # Roxo para Atrasado
-                    elif n in dezenas_ult: css = "repetida" # Verde para Repetida
+                    if n in criticos: css = "fixa"
+                    elif n in dezenas_ult: css = "repetida"
                     html_bolas += f"<div class='number-box {css}'>{n:02d}</div>"
                 st.markdown(f"<div class='numbers-grid'>{html_bolas}</div></div>", unsafe_allow_html=True)
         
