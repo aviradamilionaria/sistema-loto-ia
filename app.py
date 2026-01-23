@@ -8,8 +8,8 @@ from typing import List, Set, Dict, Tuple, Optional
 
 # --- 1. CONFIGURAÇÃO SYSTEM KERNEL ---
 st.set_page_config(
-    page_title="LotoQuant | THE BOSS V18",
-    page_icon="💼",
+    page_title="LotoQuant | REPAIR V19.0",
+    page_icon="🔧",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -44,7 +44,7 @@ st.markdown("""
         white-space: pre-line;
     }
     
-    /* Estilo do Conferidor */
+    /* Conferidor */
     .result-box { border-left: 5px solid #333; padding: 10px; margin-bottom: 5px; background: #0a0a0a; font-size: 14px;}
     .win-11 { border-left-color: #e69138; }
     .win-12 { border-left-color: #f1c232; }
@@ -113,48 +113,54 @@ class LotoEngine:
             weights[num] = count * 10 
         return weights
 
-# --- 4. THE BOSS VALIDATOR (V18) ---
-def validate_game_boss(
+# --- 4. THE VALIDATOR (V19 - STRICT) ---
+def validate_game_repair(
     game: List[int], 
     engine: LotoEngine, 
     target_odd: int, 
-    strict_sum: bool = True
+    strict_sum: bool = True,
+    elite_mode: bool = False # Se True, rejeita abertura fraca
 ) -> Tuple[bool, str]:
     
     g_set = set(game)
+    
+    # 0. CHECAGEM DE DUPLICIDADE (CRÍTICO)
+    if len(g_set) != 15:
+        return False, f"ERRO FATAL: Duplicidade encontrada ({15-len(g_set)} repetidos). ❌"
+        
     report = ""
     valid = True
     
-    # 1. ANÁLISE DE ABERTURA (HIERARQUIA DE %)
-    # Regra: Início deve ser <= 2.
-    # Regra: Segundo número deve ser <= 4 (Não aceita buraco 01...05)
-    
+    # 1. ABERTURA (CORRIGIDO PARA ELITE)
     start_ok = False
     start_msg = "❌"
     
     if game[0] == 1 and game[1] == 2:
-        start_msg = "✅ (Padrão Ouro 60%)"
+        start_msg = "✅ (Padrão Ouro)"
         start_ok = True
     elif game[0] == 1 and game[1] == 3:
-        start_msg = "✅ (Padrão Prata - Válido p/ Resgate)"
+        start_msg = "✅ (Padrão Prata)"
         start_ok = True
     elif game[0] == 2:
-        start_msg = "✅ (Padrão Bronze 30%)"
+        start_msg = "✅ (Padrão Bronze)"
         start_ok = True
     elif game[0] == 1 and game[1] == 4:
-        start_msg = "⚠️ (Limite Aceitável)"
-        start_ok = True
+        if elite_mode:
+            start_msg = "❌ (Rejeitado no J1)" # Jogo 1 não aceita isso
+            start_ok = False
+        else:
+            start_msg = "⚠️ (Limite Aceitável)"
+            start_ok = True
     else:
         start_msg = f"❌ (Inaceitável: {game[0]}-{game[1]})"
         start_ok = False
         
-    # Ponta Final
     end_ok = game[-1] >= 24
     
     if start_ok and end_ok:
         report += f"Abertura: {game[0]:02d}-{game[1]:02d} {start_msg}\nFechamento: {game[-1]:02d} ✅\n"
     else:
-        report += f"Estrutura: {game[0]}-{game[1]}...{game[-1]} ❌\n"
+        report += f"Estrutura: {game[0]}-{game[1]}...{game[-1]} {start_msg}\n"
         valid = False
 
     # 2. Ímpares
@@ -194,8 +200,8 @@ def validate_game_boss(
     
     return valid, report
 
-# --- 5. GENERATOR (BOSS) ---
-def generate_boss_game(
+# --- 5. GENERATOR (REPAIR) ---
+def generate_repair_game(
     target_repeats: int, 
     mandatory_nums: Set[int], 
     banned_nums: Set[int],
@@ -203,6 +209,7 @@ def generate_boss_game(
     weights: Dict[int, float],
     target_odd_count: int, 
     strict_sum_rule: bool = True,
+    elite_mode: bool = False,
     max_attempts: int = 10000
 ) -> Tuple[List[int], str, str]:
     
@@ -210,19 +217,21 @@ def generate_boss_game(
     universe = engine.universe
     
     for _ in range(max_attempts):
-        pool_repeats = list(last_draw - banned_nums)
-        pool_absents = list((universe - last_draw) - banned_nums)
+        # 1. IDENTIFICAR OBRIGATÓRIOS JÁ SELECIONADOS
+        sel_rep = list(mandatory_nums.intersection(last_draw))
+        sel_abs = list(mandatory_nums.intersection(universe - last_draw))
+        
+        # 2. LIMPAR OS POOLS (CORREÇÃO DA DUPLICIDADE)
+        # Removemos Banned E TAMBÉM os Mandatory já selecionados
+        pool_repeats = list(last_draw - banned_nums - set(sel_rep))
+        pool_absents = list((universe - last_draw) - banned_nums - set(sel_abs))
         
         np.random.shuffle(pool_repeats)
         np.random.shuffle(pool_absents)
         
-        sel_rep = list(mandatory_nums.intersection(last_draw))
-        sel_abs = list(mandatory_nums.intersection(universe - last_draw))
-        
         need_rep = target_repeats - len(sel_rep)
         if len(pool_repeats) < need_rep: continue
         
-        # Seleção Inteligente
         pool_repeats.sort(key=lambda x: weights.get(x, 0), reverse=True)
         candidates_rep = pool_repeats[:need_rep + 8] 
         np.random.shuffle(candidates_rep)
@@ -236,11 +245,13 @@ def generate_boss_game(
         np.random.shuffle(candidates_abs)
         sel_abs += candidates_abs[:slots]
         
+        # 3. VERIFICAÇÃO FINAL DE UNICIDADE
         candidate = sorted(sel_rep + sel_abs)
+        if len(set(candidate)) != 15: continue # Segurança extra
         
         # TRIBUNAL
-        is_valid, report = validate_game_boss(
-            candidate, engine, target_odd_count, strict_sum_rule
+        is_valid, report = validate_game_repair(
+            candidate, engine, target_odd_count, strict_sum_rule, elite_mode
         )
         
         if is_valid:
@@ -259,11 +270,11 @@ if df is not None:
     rsi_weights = engine.get_rsi_score()
     last_contest = df.iloc[-1]
     
-    # === CONFERIDOR (VOLTOU!) ===
+    # CONFERIDOR
     st.sidebar.title("🧾 CONFERIDOR")
     st.sidebar.markdown(f"**Base:** Concurso {last_contest['id']}")
     uploaded_file = st.sidebar.file_uploader("Carregar .txt", type="txt")
-    manual_input = st.sidebar.text_area("Colar jogos:", height=150, placeholder="Ex: 01 02 03...")
+    manual_input = st.sidebar.text_area("Colar jogos:", height=150)
     
     games_to_check = []
     if uploaded_file:
@@ -272,7 +283,6 @@ if df is not None:
             nums = [int(n) for n in re.findall(r'\d+', line)][:15]
             if len(nums) == 15: games_to_check.append(nums)
     elif manual_input:
-        # Regex mais robusto para pegar jogos linha a linha
         lines = manual_input.strip().split('\n')
         for line in lines:
             nums = [int(n) for n in re.findall(r'\d+', line)][:15]
@@ -308,27 +318,28 @@ if df is not None:
         squad_a = critical_all
         squad_b = critical_all
     
-    st.title("LOTOQUANT THE BOSS V18")
-    st.markdown(f"**CONCURSO:** {last_contest['id']} | **HIERARQUIA:** % DE ABERTURA")
+    st.title("LOTOQUANT REPAIR V19.0")
+    st.markdown(f"**CONCURSO:** {last_contest['id']} | **INTEGRIDADE:** ANTI-DUPLICIDADE ATIVA")
     
     c1, c2, c3 = st.columns(3)
-    c1.success(f"🦅 **J1:** Força Total {critical_all}")
+    c1.success(f"🦅 **J1:** Elite (01-02/03)")
     c2.info(f"🌊 **J2:** Esquadrão A {squad_a}")
     c3.warning(f"🛡️ **J3:** Esquadrão B {squad_b}")
 
-    if st.button("EXECUTAR COM HIERARQUIA DE %"):
+    if st.button("GERAR CERCAMENTO PERFEITO"):
         games_output = []
         progress_bar = st.progress(0)
         
         # --- JOGO 1 ---
         mandatories_g1 = set(cycle + critical_all)
-        g1, status1, report1 = generate_boss_game(
-            9, mandatories_g1, set(), engine, rsi_weights, target_odd_count=8
+        # Elite Mode = True (Rejeita 01-04)
+        g1, status1, report1 = generate_repair_game(
+            9, mandatories_g1, set(), engine, rsi_weights, target_odd_count=8, elite_mode=True
         )
         if g1:
             games_output.append({
-                "Title": "JOGO 1: SNIPER (TOTAL)", "Game": g1, 
-                "Reason": "Força Máxima.", "Report": report1, "Special": mandatories_g1
+                "Title": "JOGO 1: SNIPER (ELITE)", "Game": g1, 
+                "Reason": "Força Máxima + Abertura Ouro.", "Report": report1, "Special": mandatories_g1
             })
         progress_bar.progress(33)
         
@@ -337,14 +348,14 @@ if df is not None:
         fillers_g1 = [x for x in g1 if x not in mandatories_g1]
         banned_g2 = set(squad_b) | set(fillers_g1[:3])
         
-        g2, status2, report2 = generate_boss_game(
-            10, mandatories_g2, banned_g2, engine, rsi_weights, target_odd_count=8
+        # Elite Mode = True (Rejeita 01-04 aqui também, pois é jogo forte)
+        g2, status2, report2 = generate_repair_game(
+            10, mandatories_g2, banned_g2, engine, rsi_weights, target_odd_count=8, elite_mode=True
         )
         
-        # Fallback Persistente
         if not g2:
-             g2, status2, report2 = generate_boss_game(
-                10, mandatories_g2, set(squad_b), engine, rsi_weights, target_odd_count=8
+             g2, status2, report2 = generate_repair_game(
+                10, mandatories_g2, set(squad_b), engine, rsi_weights, target_odd_count=8, elite_mode=False
             )
              report2 += "\n🛡️ Persistência: Banimento relaxado."
 
@@ -361,13 +372,14 @@ if df is not None:
         mandatories_g3 = set(squad_b) | forgotten_numbers
         banned_g3 = set(squad_a)
         
-        g3, status3, report3 = generate_boss_game(
-            8, mandatories_g3, banned_g3, engine, rsi_weights, target_odd_count=7, strict_sum_rule=False
+        # Jogo 3 (Zebra) aceita abertura mais solta (Elite=False)
+        g3, status3, report3 = generate_repair_game(
+            8, mandatories_g3, banned_g3, engine, rsi_weights, target_odd_count=7, strict_sum_rule=False, elite_mode=False
         )
         
         if not g3:
-             g3, status3, report3 = generate_boss_game(
-                8, mandatories_g3, set(), engine, rsi_weights, target_odd_count=7, strict_sum_rule=False
+             g3, status3, report3 = generate_repair_game(
+                8, mandatories_g3, set(), engine, rsi_weights, target_odd_count=7, strict_sum_rule=False, elite_mode=False
             )
 
         if g3:
@@ -380,10 +392,12 @@ if df is not None:
         progress_bar.progress(100)
         
         # RENDER
+        txt_download = ""
         for g_data in games_output:
             nums = g_data["Game"]
             if not nums: continue 
             
+            txt_download += f"{g_data['Title']}: {nums}\n"
             special_nums = g_data.get("Special", set())
             forgotten_nums = g_data.get("Forgotten", set())
             
@@ -392,7 +406,7 @@ if df is not None:
                 <div class='game-card'>
                     <div class='card-header'>
                         <span style='color:#fff; font-weight:bold'>{g_data['Title']}</span>
-                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V18.0</span>
+                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V19.0</span>
                     </div>
                 """, unsafe_allow_html=True)
                 
@@ -408,6 +422,10 @@ if df is not None:
                 st.markdown(f"<div class='ball-grid'>{html}</div>", unsafe_allow_html=True)
                 
                 st.markdown(f"<div class='audit-box'>{g_data['Report']}</div></div>", unsafe_allow_html=True)
+                
+                txt_download += g_data['Report'].replace("✅", "[OK]").replace("❌", "[ERRO]").replace("⚠️", "[ALERTA]") + "\n" + "-"*30 + "\n"
+
+        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v19.txt")
 
 else:
     st.error("Erro de conexão. Tente recarregar.")
