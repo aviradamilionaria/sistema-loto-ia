@@ -2,15 +2,14 @@ import streamlit as st
 import pandas as pd
 import requests
 import numpy as np
-import time
-from typing import List, Set, Dict, Tuple, Optional
-from io import StringIO
 import re
+from io import StringIO
+from typing import List, Set, Dict, Tuple, Optional
 
 # --- 1. CONFIGURAÇÃO SYSTEM KERNEL ---
 st.set_page_config(
-    page_title="LotoQuant | TERMINATOR V17.0",
-    page_icon="🤖",
+    page_title="LotoQuant | THE BOSS V18",
+    page_icon="💼",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -39,12 +38,17 @@ st.markdown("""
     .b-rep { border-color: #238636; color: #238636; }
     .b-gold { border-color: #f1c232; color: #f1c232; box-shadow: 0 0 5px #f1c23244; }
     
-    /* Auditoria Texto */
     .audit-box { 
         background-color: #000; border-left: 4px solid #00ff00; 
         padding: 10px; font-size: 13px; color: #ccc; font-family: 'Consolas', monospace;
         white-space: pre-line;
     }
+    
+    /* Estilo do Conferidor */
+    .result-box { border-left: 5px solid #333; padding: 10px; margin-bottom: 5px; background: #0a0a0a; font-size: 14px;}
+    .win-11 { border-left-color: #e69138; }
+    .win-12 { border-left-color: #f1c232; }
+    .win-13 { border-left-color: #00ff00; box-shadow: 0 0 10px #00ff0033; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -109,8 +113,8 @@ class LotoEngine:
             weights[num] = count * 10 
         return weights
 
-# --- 4. THE TERMINATOR (VALIDATOR V17) ---
-def validate_game_terminator(
+# --- 4. THE BOSS VALIDATOR (V18) ---
+def validate_game_boss(
     game: List[int], 
     engine: LotoEngine, 
     target_odd: int, 
@@ -121,33 +125,44 @@ def validate_game_terminator(
     report = ""
     valid = True
     
-    # 1. Pontas e BURACOS INICIAIS
-    ponta_ini = game[0] <= 2
-    ponta_fim = game[-1] >= 24
+    # 1. ANÁLISE DE ABERTURA (HIERARQUIA DE %)
+    # Regra: Início deve ser <= 2.
+    # Regra: Segundo número deve ser <= 4 (Não aceita buraco 01...05)
     
-    # Verifica buraco inicial (ex: 01 -> 06)
-    buraco_inicial_ok = True
-    if len(game) > 1:
-        if game[1] - game[0] > 3: # Se o salto for maior que 3 (ex: 1 p/ 5 é 4, ruim)
-            buraco_inicial_ok = False
-            
-    if ponta_ini and ponta_fim and buraco_inicial_ok:
-        report += f"Estrutura: Início {game[0]:02d} / Fim {game[-1]:02d} (Sem Buracos) ✅\n"
+    start_ok = False
+    start_msg = "❌"
+    
+    if game[0] == 1 and game[1] == 2:
+        start_msg = "✅ (Padrão Ouro 60%)"
+        start_ok = True
+    elif game[0] == 1 and game[1] == 3:
+        start_msg = "✅ (Padrão Prata - Válido p/ Resgate)"
+        start_ok = True
+    elif game[0] == 2:
+        start_msg = "✅ (Padrão Bronze 30%)"
+        start_ok = True
+    elif game[0] == 1 and game[1] == 4:
+        start_msg = "⚠️ (Limite Aceitável)"
+        start_ok = True
     else:
-        if not buraco_inicial_ok:
-            report += f"Estrutura: Salto inicial muito grande ({game[0]}->{game[1]}) ❌\n"
-        else:
-            report += f"Estrutura: Pontas Erradas ❌\n"
+        start_msg = f"❌ (Inaceitável: {game[0]}-{game[1]})"
+        start_ok = False
+        
+    # Ponta Final
+    end_ok = game[-1] >= 24
+    
+    if start_ok and end_ok:
+        report += f"Abertura: {game[0]:02d}-{game[1]:02d} {start_msg}\nFechamento: {game[-1]:02d} ✅\n"
+    else:
+        report += f"Estrutura: {game[0]}-{game[1]}...{game[-1]} ❌\n"
         valid = False
 
-    # 2. Ímpares (Soberano)
+    # 2. Ímpares
     impares = len([x for x in game if x % 2 != 0])
     pares = 15 - impares
-    
     if impares == target_odd:
         report += f"Ímpares: {impares} | Pares: {pares} ✅\n"
     else:
-        # Tolerância ZERO para Paridade
         report += f"Ímpares: {impares} ❌ (Meta: {target_odd})\n"; valid = False
 
     # 3. Moldura (9 ou 10)
@@ -160,15 +175,12 @@ def validate_game_terminator(
     if 4 <= n_primos <= 6: report += f"Primos: {n_primos} ✅\n"
     else: report += f"Primos: {n_primos} ❌\n"; valid = False
         
-    # 5. Soma (180 a 210) - RELAXÁVEL no J3
+    # 5. Soma
     soma = sum(game)
-    if 180 <= soma <= 210: 
-        report += f"Soma: {soma} ✅\n"
+    if 180 <= soma <= 215: report += f"Soma: {soma} ✅\n"
     else: 
-        if strict_sum:
-            report += f"Soma: {soma} ❌ (Rigorosa)\n"; valid = False
-        else:
-            report += f"Soma: {soma} ⚠️ (Liberada p/ manter Paridade)\n"
+        if strict_sum: report += f"Soma: {soma} ❌\n"; valid = False
+        else: report += f"Soma: {soma} ⚠️ (Zebra)\n"
         
     # 6. Sequência (Max 4)
     max_seq = 0; curr_seq = 1
@@ -182,8 +194,8 @@ def validate_game_terminator(
     
     return valid, report
 
-# --- 5. THE GENERATOR (TERMINATOR LOOP) ---
-def generate_terminator_game(
+# --- 5. GENERATOR (BOSS) ---
+def generate_boss_game(
     target_repeats: int, 
     mandatory_nums: Set[int], 
     banned_nums: Set[int],
@@ -191,7 +203,7 @@ def generate_terminator_game(
     weights: Dict[int, float],
     target_odd_count: int, 
     strict_sum_rule: bool = True,
-    max_attempts: int = 10000 # Aumentei para garantir sucesso
+    max_attempts: int = 10000
 ) -> Tuple[List[int], str, str]:
     
     last_draw = engine.last_draw
@@ -201,7 +213,6 @@ def generate_terminator_game(
         pool_repeats = list(last_draw - banned_nums)
         pool_absents = list((universe - last_draw) - banned_nums)
         
-        # Shuffle
         np.random.shuffle(pool_repeats)
         np.random.shuffle(pool_absents)
         
@@ -213,7 +224,6 @@ def generate_terminator_game(
         
         # Seleção Inteligente
         pool_repeats.sort(key=lambda x: weights.get(x, 0), reverse=True)
-        # Margem de aleatoriedade para não viciar
         candidates_rep = pool_repeats[:need_rep + 8] 
         np.random.shuffle(candidates_rep)
         sel_rep += candidates_rep[:need_rep]
@@ -228,15 +238,15 @@ def generate_terminator_game(
         
         candidate = sorted(sel_rep + sel_abs)
         
-        # TRIBUNAL TERMINATOR
-        is_valid, report = validate_game_terminator(
+        # TRIBUNAL
+        is_valid, report = validate_game_boss(
             candidate, engine, target_odd_count, strict_sum_rule
         )
         
         if is_valid:
-            return candidate, "JOGO BLINDADO", report
+            return candidate, "JOGO APROVADO", report
     
-    return [], "FALHA ESTATÍSTICA (Nenhum jogo passou no crivo)", ""
+    return [], "FALHA ESTATÍSTICA", ""
 
 # --- 6. UI LAYER ---
 df = fetch_data()
@@ -249,6 +259,42 @@ if df is not None:
     rsi_weights = engine.get_rsi_score()
     last_contest = df.iloc[-1]
     
+    # === CONFERIDOR (VOLTOU!) ===
+    st.sidebar.title("🧾 CONFERIDOR")
+    st.sidebar.markdown(f"**Base:** Concurso {last_contest['id']}")
+    uploaded_file = st.sidebar.file_uploader("Carregar .txt", type="txt")
+    manual_input = st.sidebar.text_area("Colar jogos:", height=150, placeholder="Ex: 01 02 03...")
+    
+    games_to_check = []
+    if uploaded_file:
+        stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
+        for line in stringio:
+            nums = [int(n) for n in re.findall(r'\d+', line)][:15]
+            if len(nums) == 15: games_to_check.append(nums)
+    elif manual_input:
+        # Regex mais robusto para pegar jogos linha a linha
+        lines = manual_input.strip().split('\n')
+        for line in lines:
+            nums = [int(n) for n in re.findall(r'\d+', line)][:15]
+            if len(nums) == 15: games_to_check.append(nums)
+            
+    if games_to_check:
+        st.sidebar.markdown("---")
+        total_prize = 0
+        for i, game in enumerate(games_to_check):
+            hits = len(set(game) & set(last_contest['draw']))
+            css_class = ""
+            money = 0
+            if hits == 11: css_class="win-11"; money=6
+            if hits == 12: css_class="win-12"; money=12
+            if hits >= 13: css_class="win-13"; money=30
+            total_prize += money
+            st.sidebar.markdown(f"<div class='result-box {css_class}'>Jogo {i+1}: <b style='color:#fff'>{hits} Pts</b></div>", unsafe_allow_html=True)
+        
+        if total_prize > 0: st.sidebar.success(f"💰 PRÊMIO TOTAL: R$ {total_prize},00")
+        else: st.sidebar.warning("Nenhum prêmio identificado.")
+
+    # MAIN SCREEN
     critical_all = [k for k,v in delays.items() if v >= 2]
     critical_all.sort(key=lambda x: delays[x], reverse=True)
     
@@ -262,22 +308,22 @@ if df is not None:
         squad_a = critical_all
         squad_b = critical_all
     
-    st.title("LOTOQUANT TERMINATOR V17.0")
-    st.markdown(f"**CONCURSO:** {last_contest['id']} | **MODO:** TOLERÂNCIA ZERO PARA ERROS")
+    st.title("LOTOQUANT THE BOSS V18")
+    st.markdown(f"**CONCURSO:** {last_contest['id']} | **HIERARQUIA:** % DE ABERTURA")
     
     c1, c2, c3 = st.columns(3)
     c1.success(f"🦅 **J1:** Força Total {critical_all}")
     c2.info(f"🌊 **J2:** Esquadrão A {squad_a}")
     c3.warning(f"🛡️ **J3:** Esquadrão B {squad_b}")
 
-    if st.button("EXECUTAR PROTOCOLO BLINDADO"):
+    if st.button("EXECUTAR COM HIERARQUIA DE %"):
         games_output = []
         progress_bar = st.progress(0)
         
         # --- JOGO 1 ---
         mandatories_g1 = set(cycle + critical_all)
-        g1, status1, report1 = generate_terminator_game(
-            9, mandatories_g1, set(), engine, rsi_weights, target_odd_count=8, strict_sum_rule=True
+        g1, status1, report1 = generate_boss_game(
+            9, mandatories_g1, set(), engine, rsi_weights, target_odd_count=8
         )
         if g1:
             games_output.append({
@@ -291,14 +337,14 @@ if df is not None:
         fillers_g1 = [x for x in g1 if x not in mandatories_g1]
         banned_g2 = set(squad_b) | set(fillers_g1[:3])
         
-        g2, status2, report2 = generate_terminator_game(
-            10, mandatories_g2, banned_g2, engine, rsi_weights, target_odd_count=8, strict_sum_rule=True
+        g2, status2, report2 = generate_boss_game(
+            10, mandatories_g2, banned_g2, engine, rsi_weights, target_odd_count=8
         )
         
         # Fallback Persistente
         if not g2:
-             g2, status2, report2 = generate_terminator_game(
-                10, mandatories_g2, set(squad_b), engine, rsi_weights, target_odd_count=8, strict_sum_rule=True
+             g2, status2, report2 = generate_boss_game(
+                10, mandatories_g2, set(squad_b), engine, rsi_weights, target_odd_count=8
             )
              report2 += "\n🛡️ Persistência: Banimento relaxado."
 
@@ -315,13 +361,12 @@ if df is not None:
         mandatories_g3 = set(squad_b) | forgotten_numbers
         banned_g3 = set(squad_a)
         
-        # Jogo 3 libera Soma (Strict=False)
-        g3, status3, report3 = generate_terminator_game(
+        g3, status3, report3 = generate_boss_game(
             8, mandatories_g3, banned_g3, engine, rsi_weights, target_odd_count=7, strict_sum_rule=False
         )
         
         if not g3:
-             g3, status3, report3 = generate_terminator_game(
+             g3, status3, report3 = generate_boss_game(
                 8, mandatories_g3, set(), engine, rsi_weights, target_odd_count=7, strict_sum_rule=False
             )
 
@@ -347,7 +392,7 @@ if df is not None:
                 <div class='game-card'>
                     <div class='card-header'>
                         <span style='color:#fff; font-weight:bold'>{g_data['Title']}</span>
-                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V17.0</span>
+                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V18.0</span>
                     </div>
                 """, unsafe_allow_html=True)
                 
