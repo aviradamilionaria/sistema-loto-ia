@@ -6,31 +6,42 @@ import numpy as np
 import re
 from io import StringIO
 
-# --- 1. CONFIGURAÇÃO ---
+# --- 1. CONFIGURAÇÃO (VISUAL ULTIMATE) ---
 st.set_page_config(
-    page_title="LotoQuant | PRO V6.3 (HEDGE REAL)",
-    page_icon="🦅",
+    page_title="LotoQuant | ULTIMATE V8.1",
+    page_icon="🧿",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 st.markdown("""
 <style>
-    .stApp { background-color: #050505; color: #e0e0e0; }
+    .stApp { background-color: #0d1117; color: #c9d1d9; }
     .stButton>button { 
-        background: linear-gradient(180deg, #00ff88 0%, #00b360 100%);
-        color: #000; border: none; border-radius: 6px;
-        font-weight: 900; font-size: 24px; height: 75px; width: 100%;
-        text-transform: uppercase; box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+        background: linear-gradient(180deg, #238636 0%, #2ea043 100%);
+        color: white; border: none; border-radius: 6px;
+        font-weight: 900; font-size: 24px; height: 80px; width: 100%;
+        text-transform: uppercase; box-shadow: 0 4px 15px rgba(46, 160, 67, 0.4);
     }
-    .stButton>button:hover { transform: scale(1.01); }
-    .game-card { background: #0f1216; border: 1px solid #1f242d; border-radius: 12px; padding: 20px; margin-bottom: 25px; }
-    .ai-box { background-color: #1c2128; border-left: 5px solid #a371f7; padding: 15px; margin: 15px 0; border-radius: 4px; color: #d0d7de; font-family: sans-serif; font-size: 14px; }
-    .numbers-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top:10px;}
-    .number-box { background: #0d1117; border: 2px solid #30363d; color: #fff; border-radius: 50%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 18px; }
-    .fixa { border-color: #a371f7 !important; color: #a371f7 !important; }
-    .repetida { border-color: #3fb950 !important; color: #3fb950 !important; }
-    .proibida { text-decoration: line-through; color: #ff4b4b; } /* Estilo para explicar exclusão */
+    .stButton>button:hover { transform: scale(1.02); }
+    
+    .info-panel {
+        background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 15px; margin-bottom: 20px;
+        display: grid; grid-template-columns: 1fr 1fr; gap: 15px;
+    }
+    .info-box { background: #0d1117; padding: 10px; border-radius: 6px; border-left: 4px solid #58a6ff; }
+    .info-title { font-size: 12px; color: #8b949e; text-transform: uppercase; font-weight: bold; }
+    .info-value { font-size: 18px; color: #fff; font-weight: bold; }
+    
+    .game-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; margin-bottom: 25px; position: relative; }
+    .game-badge { position: absolute; top: 15px; right: 15px; background: #238636; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
+    .ai-reason { background: #21262d; border-left: 4px solid #a371f7; padding: 12px; margin: 15px 0; border-radius: 4px; color: #d0d7de; font-size: 14px; }
+    
+    .numbers-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top:10px; }
+    .number-box { background: #0d1117; border: 2px solid #30363d; color: #fff; border-radius: 50%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 20px; }
+    
+    .fixa { border-color: #a371f7 !important; color: #a371f7 !important; box-shadow: 0 0 10px rgba(163, 113, 247, 0.2); }
+    .repetida { border-color: #238636 !important; color: #3fb950 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -58,7 +69,7 @@ def baixar_dados_live():
         except: continue
     return None
 
-# --- 3. CÁLCULOS ---
+# --- 3. CÁLCULOS AVANÇADOS ---
 def analisar_ciclo(df):
     todos = set(range(1, 26))
     acumulado = set()
@@ -70,6 +81,16 @@ def analisar_ciclo(df):
             return sorted(list(todos - novo))
     return []
 
+def calcular_atrasos(df):
+    atrasos = {}
+    for i in range(1, 26):
+        atraso = 0
+        for idx in range(len(df)-1, -1, -1):
+            if i not in df.iloc[idx]['Dezenas']: atraso += 1
+            else: break
+        atrasos[i] = atraso
+    return atrasos
+
 def calcular_rsi(df):
     cols = pd.DataFrame(0, index=df.index, columns=[f'N{i}' for i in range(1,26)])
     for idx, row in df.iterrows():
@@ -80,71 +101,92 @@ def calcular_rsi(df):
         stats.append({'Bola': i, 'RSI': rsi})
     return pd.DataFrame(stats)
 
-# --- 4. GERADOR INTELIGENTE COM CONTRA-CICLO ---
-def gerar_jogos(df_stats, ultimas, ciclo):
+# --- 4. GERADOR ULTIMATE (COM FILTRO DE SOMA) ---
+def gerar_jogos_ultimate(df_stats, ultimas, ciclo, atrasos):
     jogos = []
-    quentes = df_stats.sort_values('RSI', ascending=False).head(12)['Bola'].tolist()
-    frios = df_stats.sort_values('RSI', ascending=True).head(8)['Bola'].tolist()
-    neutros = [x for x in range(1,26) if x not in quentes and x not in frios]
+    quentes = df_stats.sort_values('RSI', ascending=False)['Bola'].tolist()
+    atrasados_criticos = [k for k,v in atrasos.items() if v >= 2]
+    atrasados_criticos = sorted(atrasados_criticos, key=lambda x: atrasos[x], reverse=True)
     
-    # --- JOGO 1: APOSTA NO CICLO (LÓGICA) ---
-    base1 = list(ciclo)
-    usou_ciclo = list(ciclo)
-    fortes = [x for x in quentes if x in ultimas and x not in base1]
-    base1 += fortes[:6]
-    while len(base1) < 15: base1.append([x for x in (quentes+neutros) if x not in base1][0])
-    
-    if usou_ciclo:
-        txt1 = f"🎯 <b>MOTIVO:</b> APOSTA A FAVOR DO CICLO. Fixei <b>{usou_ciclo}</b> pois a estatística diz que devem sair hoje."
-    else:
-        txt1 = f"🎯 <b>MOTIVO:</b> Ciclo fechado. Segui a lógica pura dos números mais fortes."
+    # === JOGO 1: SNIPER (Lógica Pura) ===
+    tentativas = 0
+    while tentativas < 2000:
+        base1 = list(set(ciclo + atrasados_criticos)) # Fixa Obrigatórios
         
-    jogos.append({"Titulo": "JOGO 1: SNIPER (LÓGICA)", "Numeros": sorted(base1[:15]), "Razao": txt1, "Tipo": "Principal"})
+        # Preenchimento
+        pool = [x for x in quentes if x not in base1 and x in ultimas] # Prioriza repetidas quentes
+        np.random.shuffle(pool)
+        base1 += pool
+        
+        # Completa se faltar
+        if len(base1) < 15:
+            rest = [x for x in range(1,26) if x not in base1]
+            np.random.shuffle(rest)
+            base1 += rest[:(15-len(base1))]
+            
+        base1 = sorted(base1[:15])
+        rep = len(set(base1) & set(ultimas))
+        soma = sum(base1)
+        
+        # FILTROS DE FERRO:
+        # 1. Repetidas: 8 a 10
+        # 2. Soma: 180 a 220 (Padrão Ouro)
+        if (8 <= rep <= 10) and (180 <= soma <= 220):
+            txt1 = f"🎯 <b>ESTRATÉGIA:</b> Fixei os atrasados <b>{atrasados_criticos}</b>. Filtrei para ter <b>{rep} repetidas</b> e Soma <b>{soma}</b> (Zona Ideal)."
+            jogos.append({"Titulo": "JOGO 1: SNIPER (LÓGICA)", "Numeros": base1, "Razao": txt1, "Tag": "ATAQUE"})
+            break
+        tentativas += 1
+        
+    # === JOGO 2: VARIAÇÃO ===
+    tentativas = 0
+    while tentativas < 2000:
+        base2 = [atrasados_criticos[0]] if atrasados_criticos else [] # Mantém só o líder (16)
+        
+        pool = quentes[:18]
+        np.random.shuffle(pool)
+        for n in pool:
+            if n not in base2 and len(base2) < 15: base2.append(n)
+            
+        base2 = sorted(base2[:15])
+        rep = len(set(base2) & set(ultimas))
+        soma = sum(base2)
+        
+        if (8 <= rep <= 11) and (175 <= soma <= 225) and base2 != jogos[0]['Numeros']:
+            txt2 = f"⚖️ <b>ESTRATÉGIA:</b> Mantive o <b>{atrasados_criticos[0]}</b> mas variei o resto com RSI Alto. Soma calibrada em <b>{soma}</b>."
+            jogos.append({"Titulo": "JOGO 2: EQUILÍBRIO", "Numeros": base2, "Razao": txt2, "Tag": "MISTO"})
+            break
+        tentativas += 1
+        
+    # === JOGO 3: HEDGE (CONTRA-CICLO) ===
+    excluidos = set(ciclo + atrasados_criticos)
+    pool_seguro = [x for x in range(1,26) if x not in excluidos]
     
-    # --- JOGO 2: TENDÊNCIA (MISTO) ---
-    # Tenta usar o ciclo, mas prioriza força RSI.
-    base2 = quentes[:10] + neutros[:5]
-    # Se sobrar espaço e tiver ciclo, coloca
-    for c in ciclo:
-        if c not in base2 and len(base2) < 15: base2.append(c)
-    
-    while len(base2) < 15: base2.append([x for x in range(1,26) if x not in base2][0])
-    
-    txt2 = f"🌊 <b>MOTIVO:</b> Surfista de Tendência. Priorizei números com RSI alto (Quentes), independente do atraso."
-    jogos.append({"Titulo": "JOGO 2: TENDÊNCIA", "Numeros": sorted(base2[:15]), "Razao": txt2, "Tipo": "Ataque"})
-    
-    # --- JOGO 3: HEDGE REAL (CONTRA O CICLO) ---
-    # AQUI ESTÁ A MUDANÇA: PROIBIR OS NÚMEROS DO CICLO
-    base3 = []
-    
-    # Lista de proibidos (Números do Ciclo)
-    proibidos = ciclo
-    
-    # Pega Frios e Neutros que NÃO ESTÃO no ciclo
-    pool_seguro = [x for x in (frios + neutros + quentes) if x not in proibidos]
-    
-    # Monta o jogo só com quem SOBROU (aposta na falha do ciclo)
-    base3 = pool_seguro[:15]
-    
-    # Se faltar número (caso raro onde o ciclo é enorme), completa com o que tem
-    if len(base3) < 15:
-        falta = 15 - len(base3)
-        base3 += proibidos[:falta] # Só usa se não tiver opção
-        txt_exclusao = "Tentei excluir o ciclo, mas faltaram números."
-    else:
-        txt_exclusao = f"🚫 <b>PROIBI AS DEZENAS {proibidos}.</b>"
+    tentativas = 0
+    while tentativas < 2000:
+        np.random.shuffle(pool_seguro)
+        base3 = sorted(pool_seguro[:15])
+        if len(base3) < 15: # Fallback
+            rest = list(excluidos)
+            np.random.shuffle(rest)
+            base3 += rest[:(15-len(base3))]
+            base3 = sorted(base3)
+            
+        rep = len(set(base3) & set(ultimas))
+        
+        if 6 <= rep <= 9: # Zebra aceita soma livre
+            txt3 = f"🛡️ <b>ESTRATÉGIA:</b> Excluí propositalmente <b>{list(excluidos)}</b>. Se o atrasado falhar, aqui está sua proteção."
+            jogos.append({"Titulo": "JOGO 3: ANTI-SISTEMA", "Numeros": base3, "Razao": txt3, "Tag": "DEFESA"})
+            break
+        tentativas += 1
 
-    txt3 = f"🛡️ <b>MOTIVO:</b> HEDGE REAL (CONTRA-CICLO). {txt_exclusao}<br>Se o número do ciclo (ex: 16) falhar de novo, este é o único jogo que vai premiar."
-    jogos.append({"Titulo": "JOGO 3: PROTEÇÃO TOTAL", "Numeros": sorted(base3[:15]), "Razao": txt3, "Tipo": "Defesa"})
-    
     return jogos
 
 # --- 5. INTERFACE ---
-st.sidebar.markdown("## 🧮 CARTEIRA DIGITAL")
+st.sidebar.markdown("## 🧮 CARTEIRA")
 uploaded_file = st.sidebar.file_uploader("📂 Carregar Arquivo", type="txt")
-manual_input = st.sidebar.text_area("Ou digite (Ex: 01 02...):", height=80)
+manual_input = st.sidebar.text_area("Digitar jogo:", height=80)
 
-with st.spinner('Calculando Hedge de Proteção...'):
+with st.spinner('Auditando Estatísticas...'):
     df = baixar_dados_live()
 
 if df is not None:
@@ -179,16 +221,31 @@ if df is not None:
         else: st.sidebar.warning("Sem prêmio.")
 
     # TELA PRINCIPAL
-    st.title("🦅 LOTOQUANT | PRO V6.3")
-    st.caption(f"Concurso Atual: {ult['Concurso']} | Modo Hedge Ativado")
+    st.title("🧿 LOTOQUANT | ULTIMATE V8.1")
+    st.caption(f"Concurso: {ult['Concurso']} | Filtro de Soma: ATIVO (180-220)")
     
     ciclo = analisar_ciclo(df)
-    if ciclo: st.warning(f"⚠️ CICLO ABERTO: {ciclo}")
-    else: st.success("✅ Ciclo Fechado.")
-        
-    if st.button("🚀 GERAR ESTRATÉGIA HEDGE"):
+    atrasos = calcular_atrasos(df)
+    criticos = [k for k,v in atrasos.items() if v >= 2]
+    
+    # PAINEL DE ESPIONAGEM (AQUI VOCÊ VÊ A VERDADE)
+    st.markdown("### 📊 RAIO-X DO SORTEIO")
+    st.markdown(f"""
+    <div class='info-panel'>
+        <div class='info-box' style='border-color:#a371f7'>
+            <div class='info-title'>ATRASADOS (>2 Jogos)</div>
+            <div class='info-value'>{criticos if criticos else "Nenhum Crítico"}</div>
+        </div>
+        <div class='info-box' style='border-color:#3fb950'>
+            <div class='info-title'>FALTAM NO CICLO</div>
+            <div class='info-value'>{ciclo if ciclo else "Ciclo Fechado"}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("🚀 GERAR JOGOS BLINDADOS"):
         stats = calcular_rsi(df)
-        jogos = gerar_jogos(stats, dezenas_ult, ciclo)
+        jogos = gerar_jogos_ultimate(stats, dezenas_ult, ciclo, atrasos)
         
         txt_out = f"--- CONCURSO {ult['Concurso']+1} ---\n\n"
         
@@ -196,27 +253,30 @@ if df is not None:
             nums = jogo['Numeros']
             txt_out += f"{jogo['Titulo']}: {nums}\n"
             rep = len(set(nums) & set(dezenas_ult))
+            soma = sum(nums)
             
             with st.container():
                 st.markdown(f"""
                 <div class='game-card'>
-                    <h3 style='color:#00ff88'>{jogo['Titulo']}</h3>
-                    <div class='ai-box'>{jogo['Razao']}</div>
-                    <div style='font-size:12px; color:#8b949e'>
-                        REPETIDAS: <b style='color:#fff'>{rep}</b> | SOMA: <b style='color:#fff'>{sum(nums)}</b>
+                    <div class='game-badge'>{jogo['Tag']}</div>
+                    <h3 style='color:#58a6ff'>{jogo['Titulo']}</h3>
+                    <div class='ai-reason'>{jogo['Razao']}</div>
+                    <div style='display:flex; justify-content:space-between; font-size:13px; color:#8b949e; margin-top:10px;'>
+                        <span>REPETIDAS: <b style='color:#fff'>{rep}</b></span>
+                        <span>SOMA: <b style='color:#fff'>{soma}</b></span>
                     </div>
                 """, unsafe_allow_html=True)
                 
                 cols = st.columns(5)
                 html_bolas = ""
                 for n in nums:
-                    css = "fria"
-                    if n in ciclo: css = "fixa"
-                    elif n in dezenas_ult: css = "repetida"
+                    css = ""
+                    if n in criticos: css = "fixa" # Roxo para Atrasado
+                    elif n in dezenas_ult: css = "repetida" # Verde para Repetida
                     html_bolas += f"<div class='number-box {css}'>{n:02d}</div>"
                 st.markdown(f"<div class='numbers-grid'>{html_bolas}</div></div>", unsafe_allow_html=True)
         
-        st.download_button("💾 SALVAR JOGOS", data=txt_out, file_name="jogos.txt")
+        st.download_button("💾 SALVAR JOGOS", data=txt_out, file_name="jogos_ultimate.txt")
 
 else:
     st.error("Erro ao conectar. Tente recarregar.")
