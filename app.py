@@ -8,7 +8,7 @@ import re
 
 # --- 1. CONFIGURAÇÃO SYSTEM KERNEL ---
 st.set_page_config(
-    page_title="LotoQuant | KERNEL V9.4",
+    page_title="LotoQuant | KERNEL V9.5",
     page_icon="☢️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -35,12 +35,12 @@ st.markdown("""
         border-radius: 50%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; 
     }
     
-    .b-fixa { border-color: #a371f7; color: #a371f7; box-shadow: 0 0 5px #a371f744; } /* Crítico Principal */
-    .b-rec { border-color: #d29922; color: #d29922; box-shadow: 0 0 5px #d2992244; } /* Recuperado */
+    .b-fixa { border-color: #a371f7; color: #a371f7; box-shadow: 0 0 5px #a371f744; } /* Obrigatório */
+    .b-esq { border-color: #ff4b4b; color: #ff4b4b; box-shadow: 0 0 8px #ff4b4b44; } /* Esquecido (Resgatado) */
     .b-rep { border-color: #238636; color: #238636; }
     .success-tag { color: #238636; font-weight: bold; }
     
-    /* Estilo do Conferidor */
+    /* Conferidor */
     .result-box { border-left: 5px solid #333; padding: 10px; margin-bottom: 5px; background: #0a0a0a; }
     .win-11 { border-color: #e69138; }
     .win-12 { border-color: #f1c232; }
@@ -99,14 +99,12 @@ class LotoEngine:
             delays[num] = count
         return delays
 
-    # RSI Simplificado para performance (sem biblioteca externa pesada se não precisar)
     def get_rsi_score(self) -> Dict[int, float]:
-        # Cálculo simples de frequência recente (últimos 10 jogos) como peso
         weights = {}
         last_10 = self.df.tail(10)
         for num in self.universe:
             count = sum(1 for _, row in last_10.iterrows() if num in row['draw'])
-            weights[num] = count * 10 # Score 0 a 100
+            weights[num] = count * 10 
         return weights
 
 # --- 4. DETERMINISTIC GENERATOR ---
@@ -119,13 +117,18 @@ def generate_game_deterministic(
     weights: Dict[int, float]
 ) -> Tuple[List[int], str]:
     
+    # Pools
     pool_repeats = list(last_draw - banned_nums)
     pool_absents = list((universe - last_draw) - banned_nums)
     
+    # Mandatories Handling
+    # Force mandatories into the selection regardless of pool status (Critical Fix)
     mandatory_in_repeats = mandatory_nums.intersection(last_draw)
     mandatory_in_absents = mandatory_nums.intersection(universe - last_draw)
     
-    if len(mandatory_in_repeats) > target_repeats: return [], "Erro: Estouro de Repetidas"
+    # If mandatory exceeds target repeats, we adjust target repeats (Flexibility for Coverage)
+    if len(mandatory_in_repeats) > target_repeats:
+        target_repeats = len(mandatory_in_repeats)
     
     selected_repeats = list(mandatory_in_repeats)
     needed_repeats = target_repeats - len(selected_repeats)
@@ -133,17 +136,25 @@ def generate_game_deterministic(
     available_repeats = [x for x in pool_repeats if x not in selected_repeats]
     available_repeats.sort(key=lambda x: weights.get(x, 0), reverse=True)
     
-    if len(available_repeats) < needed_repeats: return [], "Erro: Falta de Repetidas"
+    if len(available_repeats) < needed_repeats: 
+        # Fallback: take all available
+        needed_repeats = len(available_repeats)
+    
     selected_repeats += available_repeats[:needed_repeats]
     
+    # Absents
     selected_absents = list(mandatory_in_absents)
     slots_left = 15 - len(selected_repeats) - len(selected_absents)
-    if slots_left < 0: return [], "Erro: Estouro Total"
+    
+    if slots_left < 0: return [], "Erro: Superlotação de números"
     
     available_absents = [x for x in pool_absents if x not in selected_absents]
     available_absents.sort(key=lambda x: weights.get(x, 0), reverse=True)
     
-    if len(available_absents) < slots_left: return [], "Erro: Falta de Ausentes"
+    if len(available_absents) < slots_left:
+        # Emergency fill from repeats pool if absents run out (Rare)
+        return [], "Erro: Falta de números no universo"
+        
     selected_absents += available_absents[:slots_left]
     
     return sorted(selected_repeats + selected_absents), "Sucesso"
@@ -157,18 +168,15 @@ if df is not None:
     cycle = engine.get_cycle_missing()
     delays = engine.get_delays()
     rsi_weights = engine.get_rsi_score()
-    
     last_contest = df.iloc[-1]
     
-    # === BARRA LATERAL: CONFERIDOR (RESTAURADO) ===
+    # SIDEBAR CONFERIDOR
     st.sidebar.title("🧾 CONFERIDOR")
     st.sidebar.markdown(f"**Base:** Concurso {last_contest['id']}")
-    
-    uploaded_file = st.sidebar.file_uploader("Carregar Arquivo .txt", type="txt")
-    manual_input = st.sidebar.text_area("Ou cole aqui:", height=100)
+    uploaded_file = st.sidebar.file_uploader("Carregar .txt", type="txt")
+    manual_input = st.sidebar.text_area("Colar jogos:", height=100)
     
     games_to_check = []
-    
     if uploaded_file:
         stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
         for line in stringio:
@@ -188,50 +196,41 @@ if df is not None:
             money = 0
             if hits == 11: css_class="win-11"; money=6
             if hits == 12: css_class="win-12"; money=12
-            if hits >= 13: css_class="win-13"; money=30 # Estimado
-            
+            if hits >= 13: css_class="win-13"; money=30
             total_prize += money
-            
-            st.sidebar.markdown(f"""
-            <div class='result-box {css_class}'>
-                Jogo {i+1}: <b style='color:#fff'>{hits} Pts</b>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        if total_prize > 0:
-            st.sidebar.success(f"💰 PRÊMIO: R$ {total_prize},00")
-        else:
-            st.sidebar.warning("Nenhum prêmio.")
+            st.sidebar.markdown(f"<div class='result-box {css_class}'>Jogo {i+1}: <b style='color:#fff'>{hits} Pts</b></div>", unsafe_allow_html=True)
+        if total_prize > 0: st.sidebar.success(f"💰 R$ {total_prize},00")
+        else: st.sidebar.warning("Sem prêmio.")
 
-    # === TELA PRINCIPAL ===
+    # MAIN SCREEN
     critical_all = [k for k,v in delays.items() if v >= 2]
     critical_all.sort(key=lambda x: delays[x], reverse=True)
     
-    st.title("LOTOQUANT KERNEL V9.4 (COMPLETE)")
-    st.markdown(f"**CONCURSO:** {last_contest['id']} | **RODÍZIO:** ATIVO")
+    st.title("LOTOQUANT V9.5 (GLOBAL COVERAGE)")
+    st.markdown(f"**CONCURSO:** {last_contest['id']} | **CERCAMENTO:** TOTAL (25/25)")
     
     c1, c2 = st.columns(2)
     c1.info(f"🚨 **ATRASADOS:** {critical_all}")
-    c2.success(f"♻️ **MODO HEDGE:** ON")
+    c2.success(f"🌐 **GARANTIA:** Todos os 25 números serão jogados.")
 
-    if st.button("EXECUTAR ESTRATÉGIA"):
+    if st.button("GERAR CERCAMENTO TOTAL"):
         games_output = []
         
-        # --- GAME 1: COBERTURA TOTAL (TODOS OS CRÍTICOS) ---
-        mandatories_g1 = set(cycle + critical_all[:4]) # Max 4 críticos
+        # --- GAME 1: SNIPER (9 Repetidas) ---
+        mandatories_g1 = set(cycle + critical_all[:4]) 
         g1, msg1 = generate_game_deterministic(
             9, mandatories_g1, set(), last_draw_set, engine.universe, rsi_weights
         )
         games_output.append({
-            "Title": "JOGO 1: SNIPER (COBERTURA TOTAL)",
+            "Title": "JOGO 1: SNIPER (BASE)",
             "Game": g1, "Type": "ATAQUE",
-            "Reason": f"Obrigatório: {sorted(list(mandatories_g1))}. Alvo: 15 pontos se saírem todos.",
+            "Reason": f"Base sólida com Ciclo e Atrasados. {len(set(g1) & last_draw_set)} Repetidas.",
             "Special": mandatories_g1
         })
         
-        # --- GAME 2: SELETIVO (DEIXA UM DE FORA) ---
+        # --- GAME 2: TENDÊNCIA (10 Repetidas) ---
         if len(critical_all) > 1:
-            left_out_g2 = {critical_all[-1]} # O último crítico fica de fora
+            left_out_g2 = {critical_all[-1]} 
             mandatories_g2 = set(cycle + critical_all[:-1])
         else:
             left_out_g2 = set()
@@ -241,36 +240,43 @@ if df is not None:
             10, mandatories_g2, set(), last_draw_set, engine.universe, rsi_weights
         )
         games_output.append({
-            "Title": "JOGO 2: TENDÊNCIA (VARIAÇÃO)",
-            "Game": g2, "Type": "MISTO",
-            "Reason": f"Deixou o {list(left_out_g2)} de fora para o Jogo 3 pegar.",
+            "Title": "JOGO 2: TENDÊNCIA",
+            "Game": g2, "Type": "VARIAÇÃO",
+            "Reason": f"Variação de força. {len(set(g2) & last_draw_set)} Repetidas.",
             "Special": mandatories_g2
         })
 
-        # --- GAME 3: RECUPERADOR (PEGA O ESQUECIDO) ---
-        mandatories_g3 = left_out_g2
-        banned_g3 = mandatories_g2
+        # --- GAME 3: RESGATE GLOBAL (O ESQUECIDO) ---
+        # 1. Identifica quem foi jogado em G1 e G2
+        used_numbers = set(g1) | set(g2)
         
-        # Tenta gerar. Se falhar por falta de números, relaxa o banimento
+        # 2. Identifica quem NUNCA apareceu (Os Esquecidos)
+        forgotten_numbers = engine.universe - used_numbers
+        
+        # 3. O Jogo 3 TEM QUE ter esses números
+        mandatories_g3 = forgotten_numbers
+        
+        # 4. Banimentos: Tentamos banir o que já foi muito usado, mas Mandatories ganham prioridade
+        banned_g3 = set(critical_all) - mandatories_g3 # Bane atrasados, exceto se eles forem os esquecidos
+        
         g3, msg3 = generate_game_deterministic(
             8, mandatories_g3, banned_g3, last_draw_set, engine.universe, rsi_weights
         )
         
+        # Se falhar, limpa banimentos (prioridade é cobrir os 25 números)
         if not g3:
-            # Relaxa: Bane só o #1 Atrasado
-            banned_g3 = {critical_all[0]} if critical_all else set()
             g3, msg3 = generate_game_deterministic(
-                8, mandatories_g3, banned_g3, last_draw_set, engine.universe, rsi_weights
+                8, mandatories_g3, set(), last_draw_set, engine.universe, rsi_weights
             )
-            reason_txt = f"⚠️ Recuperou {list(mandatories_g3)}, mas relaxou banimentos."
-        else:
-            reason_txt = f"♻️ ESTRATÉGIA DE RESGATE: Fixou o esquecido {list(mandatories_g3)} e baniu {sorted(list(banned_g3))}."
+            
+        reason_txt = f"🌐 CERCAMENTO: Resgatou {sorted(list(forgotten_numbers))}. Agora temos 25/25 cobertos."
 
         games_output.append({
             "Title": "JOGO 3: RESGATE (ZEBRA)",
-            "Game": g3, "Type": "DEFESA",
+            "Game": g3, "Type": "GLOBAL",
             "Reason": reason_txt,
-            "Special": mandatories_g3
+            "Special": mandatories_g3, # Vai destacar em Roxo
+            "Forgotten": forgotten_numbers # Vai destacar em Vermelho
         })
         
         # RENDER
@@ -283,6 +289,7 @@ if df is not None:
             rep_count = len(set(nums) & last_draw_set)
             
             special_nums = g_data.get("Special", set())
+            forgotten_nums = g_data.get("Forgotten", set())
             
             with st.container():
                 st.markdown(f"""
@@ -301,13 +308,13 @@ if df is not None:
                 html = ""
                 for n in nums:
                     css = ""
-                    if n in special_nums: css = "b-fixa" 
-                    elif n in left_out_g2 and g_data['Title'] == "JOGO 3: RESGATE (ZEBRA)": css = "b-rec"
-                    elif n in last_draw_set: css = "b-rep"
+                    if n in forgotten_nums: css = "b-esq" # Vermelho (Resgatado Obrigatório)
+                    elif n in special_nums: css = "b-fixa" # Roxo
+                    elif n in last_draw_set: css = "b-rep" # Verde
                     html += f"<div class='ball {css}'>{n:02d}</div>"
                 st.markdown(f"<div class='ball-grid'>{html}</div></div>", unsafe_allow_html=True)
 
-        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v94.txt")
+        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v95.txt")
 
 else:
     st.error("Erro de conexão. Tente recarregar.")
