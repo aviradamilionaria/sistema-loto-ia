@@ -8,7 +8,7 @@ import re
 
 # --- 1. CONFIGURAÇÃO SYSTEM KERNEL ---
 st.set_page_config(
-    page_title="LotoQuant | KERNEL V9.5",
+    page_title="LotoQuant | KERNEL V9.6",
     page_icon="☢️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -38,7 +38,6 @@ st.markdown("""
     .b-fixa { border-color: #a371f7; color: #a371f7; box-shadow: 0 0 5px #a371f744; } /* Obrigatório */
     .b-esq { border-color: #ff4b4b; color: #ff4b4b; box-shadow: 0 0 8px #ff4b4b44; } /* Esquecido (Resgatado) */
     .b-rep { border-color: #238636; color: #238636; }
-    .success-tag { color: #238636; font-weight: bold; }
     
     /* Conferidor */
     .result-box { border-left: 5px solid #333; padding: 10px; margin-bottom: 5px; background: #0a0a0a; }
@@ -121,40 +120,33 @@ def generate_game_deterministic(
     pool_repeats = list(last_draw - banned_nums)
     pool_absents = list((universe - last_draw) - banned_nums)
     
-    # Mandatories Handling
-    # Force mandatories into the selection regardless of pool status (Critical Fix)
+    # Check Mandatories
     mandatory_in_repeats = mandatory_nums.intersection(last_draw)
     mandatory_in_absents = mandatory_nums.intersection(universe - last_draw)
     
-    # If mandatory exceeds target repeats, we adjust target repeats (Flexibility for Coverage)
     if len(mandatory_in_repeats) > target_repeats:
-        target_repeats = len(mandatory_in_repeats)
+        target_repeats = len(mandatory_in_repeats) # Auto-adjust
     
+    # Select Repeats
     selected_repeats = list(mandatory_in_repeats)
     needed_repeats = target_repeats - len(selected_repeats)
     
     available_repeats = [x for x in pool_repeats if x not in selected_repeats]
     available_repeats.sort(key=lambda x: weights.get(x, 0), reverse=True)
     
-    if len(available_repeats) < needed_repeats: 
-        # Fallback: take all available
-        needed_repeats = len(available_repeats)
-    
+    if len(available_repeats) < needed_repeats: needed_repeats = len(available_repeats)
     selected_repeats += available_repeats[:needed_repeats]
     
-    # Absents
+    # Select Absents
     selected_absents = list(mandatory_in_absents)
     slots_left = 15 - len(selected_repeats) - len(selected_absents)
     
-    if slots_left < 0: return [], "Erro: Superlotação de números"
+    if slots_left < 0: return [], "Erro: Superlotação"
     
     available_absents = [x for x in pool_absents if x not in selected_absents]
     available_absents.sort(key=lambda x: weights.get(x, 0), reverse=True)
     
-    if len(available_absents) < slots_left:
-        # Emergency fill from repeats pool if absents run out (Rare)
-        return [], "Erro: Falta de números no universo"
-        
+    if len(available_absents) < slots_left: return [], "Erro: Falta de Números"
     selected_absents += available_absents[:slots_left]
     
     return sorted(selected_repeats + selected_absents), "Sucesso"
@@ -206,77 +198,85 @@ if df is not None:
     critical_all = [k for k,v in delays.items() if v >= 2]
     critical_all.sort(key=lambda x: delays[x], reverse=True)
     
-    st.title("LOTOQUANT V9.5 (GLOBAL COVERAGE)")
+    st.title("LOTOQUANT V9.6 (ANTI-CLONE)")
     st.markdown(f"**CONCURSO:** {last_contest['id']} | **CERCAMENTO:** TOTAL (25/25)")
     
     c1, c2 = st.columns(2)
     c1.info(f"🚨 **ATRASADOS:** {critical_all}")
-    c2.success(f"🌐 **GARANTIA:** Todos os 25 números serão jogados.")
+    c2.success(f"🌐 **DIVERGÊNCIA:** ATIVADA (Jogos Distintos)")
 
-    if st.button("GERAR CERCAMENTO TOTAL"):
+    if st.button("GERAR CERCAMENTO PROFISSIONAL"):
         games_output = []
         
-        # --- GAME 1: SNIPER (9 Repetidas) ---
+        # --- JOGO 1: O MELHOR POSSÍVEL (A NATA) ---
         mandatories_g1 = set(cycle + critical_all[:4]) 
         g1, msg1 = generate_game_deterministic(
             9, mandatories_g1, set(), last_draw_set, engine.universe, rsi_weights
         )
         games_output.append({
-            "Title": "JOGO 1: SNIPER (BASE)",
+            "Title": "JOGO 1: SNIPER (BASE FORTE)",
             "Game": g1, "Type": "ATAQUE",
-            "Reason": f"Base sólida com Ciclo e Atrasados. {len(set(g1) & last_draw_set)} Repetidas.",
+            "Reason": f"Melhores probabilidades matemáticas. {len(set(g1) & last_draw_set)} Repetidas.",
             "Special": mandatories_g1
         })
         
-        # --- GAME 2: TENDÊNCIA (10 Repetidas) ---
+        # --- JOGO 2: A VARIAÇÃO FORÇADA ---
+        # Lógica: Pegar os críticos, mas BANIR alguns números "comuns" que o Jogo 1 usou
+        # para forçar o sistema a escolher outros caminhos.
+        
         if len(critical_all) > 1:
             left_out_g2 = {critical_all[-1]} 
             mandatories_g2 = set(cycle + critical_all[:-1])
         else:
             left_out_g2 = set()
             mandatories_g2 = set(cycle + critical_all)
-            
+
+        # IDENTIFICAÇÃO DE "CLONES":
+        # Pegamos os números do Jogo 1 que NÃO são críticos.
+        # Esses são os "fillers" (preenchimento).
+        fillers_g1 = [x for x in g1 if x not in mandatories_g1]
+        
+        # Vamos BANIR os 4 melhores fillers do Jogo 1 no Jogo 2.
+        # Isso obriga o Jogo 2 a usar "Segunda Linha" de força, criando diferença real.
+        banned_for_g2 = set(fillers_g1[:4]) 
+        
         g2, msg2 = generate_game_deterministic(
-            10, mandatories_g2, set(), last_draw_set, engine.universe, rsi_weights
+            10, mandatories_g2, banned_for_g2, last_draw_set, engine.universe, rsi_weights
         )
         games_output.append({
-            "Title": "JOGO 2: TENDÊNCIA",
-            "Game": g2, "Type": "VARIAÇÃO",
-            "Reason": f"Variação de força. {len(set(g2) & last_draw_set)} Repetidas.",
+            "Title": "JOGO 2: TENDÊNCIA (VARIAÇÃO)",
+            "Game": g2, "Type": "MISTO",
+            "Reason": f"Evitou repetir os mesmos fillers do Jogo 1. {len(set(g2) & last_draw_set)} Repetidas.",
             "Special": mandatories_g2
         })
 
-        # --- GAME 3: RESGATE GLOBAL (O ESQUECIDO) ---
-        # 1. Identifica quem foi jogado em G1 e G2
+        # --- JOGO 3: RESGATE GLOBAL (ZERO LOSS) ---
         used_numbers = set(g1) | set(g2)
-        
-        # 2. Identifica quem NUNCA apareceu (Os Esquecidos)
         forgotten_numbers = engine.universe - used_numbers
         
-        # 3. O Jogo 3 TEM QUE ter esses números
         mandatories_g3 = forgotten_numbers
         
-        # 4. Banimentos: Tentamos banir o que já foi muito usado, mas Mandatories ganham prioridade
-        banned_g3 = set(critical_all) - mandatories_g3 # Bane atrasados, exceto se eles forem os esquecidos
+        # Tenta banir críticos para ser Zebra, mas dá prioridade ao resgate
+        banned_g3 = set(critical_all) - mandatories_g3
         
         g3, msg3 = generate_game_deterministic(
             8, mandatories_g3, banned_g3, last_draw_set, engine.universe, rsi_weights
         )
         
-        # Se falhar, limpa banimentos (prioridade é cobrir os 25 números)
         if not g3:
+            # Se travar, libera banimentos
             g3, msg3 = generate_game_deterministic(
                 8, mandatories_g3, set(), last_draw_set, engine.universe, rsi_weights
             )
             
-        reason_txt = f"🌐 CERCAMENTO: Resgatou {sorted(list(forgotten_numbers))}. Agora temos 25/25 cobertos."
+        reason_txt = f"🌐 CERCAMENTO: Resgatou {sorted(list(forgotten_numbers))}. 25/25 Cobertos."
 
         games_output.append({
             "Title": "JOGO 3: RESGATE (ZEBRA)",
             "Game": g3, "Type": "GLOBAL",
             "Reason": reason_txt,
-            "Special": mandatories_g3, # Vai destacar em Roxo
-            "Forgotten": forgotten_numbers # Vai destacar em Vermelho
+            "Special": mandatories_g3,
+            "Forgotten": forgotten_numbers 
         })
         
         # RENDER
@@ -308,13 +308,13 @@ if df is not None:
                 html = ""
                 for n in nums:
                     css = ""
-                    if n in forgotten_nums: css = "b-esq" # Vermelho (Resgatado Obrigatório)
+                    if n in forgotten_nums: css = "b-esq" # Vermelho
                     elif n in special_nums: css = "b-fixa" # Roxo
                     elif n in last_draw_set: css = "b-rep" # Verde
                     html += f"<div class='ball {css}'>{n:02d}</div>"
                 st.markdown(f"<div class='ball-grid'>{html}</div></div>", unsafe_allow_html=True)
 
-        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v95.txt")
+        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v96.txt")
 
 else:
     st.error("Erro de conexão. Tente recarregar.")
