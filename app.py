@@ -8,8 +8,8 @@ import re
 
 # --- 1. CONFIGURAÇÃO SYSTEM KERNEL ---
 st.set_page_config(
-    page_title="LotoQuant | ARCHITECT V10.0",
-    page_icon="📐",
+    page_title="LotoQuant | SNIPER V10.1",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -39,6 +39,7 @@ st.markdown("""
     .b-esq { border-color: #ff4b4b; color: #ff4b4b; box-shadow: 0 0 8px #ff4b4b44; } /* Esquecido (Resgatado) */
     .b-rep { border-color: #238636; color: #238636; }
     .success-tag { color: #238636; font-weight: bold; }
+    .alert-tag { color: #d29922; font-weight: bold; }
     
     /* Conferidor */
     .result-box { border-left: 5px solid #333; padding: 10px; margin-bottom: 5px; background: #0a0a0a; }
@@ -107,62 +108,56 @@ class LotoEngine:
             weights[num] = count * 10 
         return weights
 
-# --- 4. DETERMINISTIC GENERATOR (ARCHITECT EDITION) ---
-def generate_game_architect(
+# --- 4. DETERMINISTIC GENERATOR (SNIPER EDITION) ---
+def generate_game_sniper(
     target_repeats: int, 
     mandatory_nums: Set[int], 
     banned_nums: Set[int],
     last_draw: Set[int],
     universe: Set[int],
     weights: Dict[int, float],
-    force_start: bool = True # NOVO: Obriga começar com 1-6
+    force_start_limit: int = 3, # Começar no máximo com 03
+    max_sum: int = 210 # Soma Máxima Tolerada
 ) -> Tuple[List[int], str]:
     
     # 1. Preparação dos Pools
     pool_repeats = list(last_draw - banned_nums)
     pool_absents = list((universe - last_draw) - banned_nums)
     
-    # 2. Separação dos Obrigatórios
     mandatory_in_repeats = mandatory_nums.intersection(last_draw)
     mandatory_in_absents = mandatory_nums.intersection(universe - last_draw)
     
     selected_repeats = list(mandatory_in_repeats)
     selected_absents = list(mandatory_in_absents)
     
-    # 3. LÓGICA DE START (CORREÇÃO DO BUG DO 07)
-    # Verifica se já temos algum número entre 1 e 5 selecionado
-    has_start = any(n <= 6 for n in (selected_repeats + selected_absents))
+    # 2. TRAVA DE INÍCIO RIGOROSA (1 a 3)
+    # Verifica se já tem alguém <= 3
+    has_start = any(n <= force_start_limit for n in (selected_repeats + selected_absents))
     
-    if force_start and not has_start:
-        # Precisamos forçar um número baixo. Qual é o melhor?
-        # Procura nos pools disponíveis
-        start_candidates_rep = [x for x in pool_repeats if x <= 6 and x not in selected_repeats]
-        start_candidates_abs = [x for x in pool_absents if x <= 6 and x not in selected_absents]
+    if not has_start:
+        # Busca candidatos válidos <= 3
+        cand_rep = [x for x in pool_repeats if x <= force_start_limit and x not in selected_repeats]
+        cand_abs = [x for x in pool_absents if x <= force_start_limit and x not in selected_absents]
         
-        # Escolhe o melhor candidato baseado no peso
         best_start = None
-        is_repeat = False
+        is_rep = False
         
-        # Compara o melhor repetido com o melhor ausente
-        best_rep = max(start_candidates_rep, key=lambda x: weights.get(x, 0)) if start_candidates_rep else None
-        best_abs = max(start_candidates_abs, key=lambda x: weights.get(x, 0)) if start_candidates_abs else None
+        # Pega o melhor (maior peso RSI)
+        best_r = max(cand_rep, key=lambda x: weights.get(x, 0)) if cand_rep else None
+        best_a = max(cand_abs, key=lambda x: weights.get(x, 0)) if cand_abs else None
         
-        if best_rep and best_abs:
-            if weights.get(best_rep, 0) >= weights.get(best_abs, 0):
-                best_start = best_rep; is_repeat = True
-            else:
-                best_start = best_abs; is_repeat = False
-        elif best_rep:
-            best_start = best_rep; is_repeat = True
-        elif best_abs:
-            best_start = best_abs; is_repeat = False
+        if best_r and best_a:
+            if weights.get(best_r, 0) >= weights.get(best_a, 0): best_start = best_r; is_rep = True
+            else: best_start = best_a; is_rep = False
+        elif best_r: best_start = best_r; is_rep = True
+        elif best_a: best_start = best_a; is_rep = False
             
         if best_start:
-            if is_repeat: selected_repeats.append(best_start)
+            if is_rep: selected_repeats.append(best_start)
             else: selected_absents.append(best_start)
-            
-    # 4. Preenchimento do Restante (Respeitando a contagem exata)
-    if len(selected_repeats) > target_repeats: target_repeats = len(selected_repeats) # Ajuste flexível
+    
+    # 3. Preenchimento Normal
+    if len(selected_repeats) > target_repeats: target_repeats = len(selected_repeats)
     
     needed_repeats = target_repeats - len(selected_repeats)
     available_repeats = [x for x in pool_repeats if x not in selected_repeats]
@@ -171,7 +166,6 @@ def generate_game_architect(
     if len(available_repeats) < needed_repeats: needed_repeats = len(available_repeats)
     selected_repeats += available_repeats[:needed_repeats]
     
-    # Preenchimento Ausentes
     slots_left = 15 - len(selected_repeats) - len(selected_absents)
     if slots_left < 0: return [], "Erro: Superlotação"
     
@@ -181,7 +175,44 @@ def generate_game_architect(
     if len(available_absents) < slots_left: return [], "Erro: Falta de Ausentes"
     selected_absents += available_absents[:slots_left]
     
-    return sorted(selected_repeats + selected_absents), "Sucesso"
+    final_game = sorted(selected_repeats + selected_absents)
+    
+    # 4. CORREÇÃO DE SOMA (BALANCEAMENTO)
+    # Se a soma estourar > 210, trocamos o maior número não-obrigatório por um menor disponível
+    current_sum = sum(final_game)
+    attempts = 0
+    
+    while current_sum > max_sum and attempts < 5:
+        # Pega o maior número do jogo que NÃO é obrigatório
+        candidates_to_remove = [x for x in final_game if x not in mandatory_nums]
+        if not candidates_to_remove: break # Se todos forem obrigatórios, não tem como trocar
+        
+        to_remove = max(candidates_to_remove)
+        
+        # Procura um substituto menor que NÃO está no jogo
+        # O substituto deve respeitar a classe (repetida ou ausente) se possível, para não quebrar a lógica
+        is_rep_removed = to_remove in last_draw
+        
+        potential_subs = []
+        if is_rep_removed:
+            potential_subs = [x for x in pool_repeats if x not in final_game and x < to_remove]
+        else:
+            potential_subs = [x for x in pool_absents if x not in final_game and x < to_remove]
+            
+        if potential_subs:
+            # Pega o menor possível para baixar a soma drasticamente
+            substitute = min(potential_subs)
+            
+            # Troca
+            final_game.remove(to_remove)
+            final_game.append(substitute)
+            final_game.sort()
+            current_sum = sum(final_game)
+        else:
+            break # Não achou substituto, para o loop
+        attempts += 1
+            
+    return final_game, "Sucesso"
 
 # --- 5. UI LAYER ---
 df = fetch_data()
@@ -230,25 +261,25 @@ if df is not None:
     critical_all = [k for k,v in delays.items() if v >= 2]
     critical_all.sort(key=lambda x: delays[x], reverse=True)
     
-    st.title("LOTOQUANT ARCHITECT V10.0")
-    st.markdown(f"**CONCURSO:** {last_contest['id']} | **TRAVA DE INÍCIO:** ATIVA (01-06)")
+    st.title("LOTOQUANT SNIPER V10.1")
+    st.markdown(f"**CONCURSO:** {last_contest['id']} | **TRAVA INÍCIO:** RIGOROSA (01-03)")
     
     c1, c2 = st.columns(2)
     c1.info(f"🚨 **ATRASADOS:** {critical_all}")
-    c2.success(f"🌐 **GARANTIA:** Resgate obrigatório de falhas.")
+    c2.success(f"🌐 **SOMA MÁXIMA:** 210 (Automática)")
 
-    if st.button("GERAR ARQUITETURA DE JOGO"):
+    if st.button("GERAR CERCAMENTO PROFISSIONAL"):
         games_output = []
         
         # --- JOGO 1: BASE FORTE ---
         mandatories_g1 = set(cycle + critical_all[:4]) 
-        g1, msg1 = generate_game_architect(
-            9, mandatories_g1, set(), last_draw_set, engine.universe, rsi_weights, force_start=True
+        g1, msg1 = generate_game_sniper(
+            9, mandatories_g1, set(), last_draw_set, engine.universe, rsi_weights, force_start_limit=3, max_sum=210
         )
         games_output.append({
             "Title": "JOGO 1: SNIPER (BASE)",
             "Game": g1, "Type": "ATAQUE",
-            "Reason": f"Obrigatórios: {sorted(list(mandatories_g1))}. Início corrigido.",
+            "Reason": f"Obrigatórios: {sorted(list(mandatories_g1))}. Soma ajustada.",
             "Special": mandatories_g1
         })
         
@@ -260,43 +291,34 @@ if df is not None:
             left_out_g2 = set()
             mandatories_g2 = set(cycle + critical_all)
 
-        # Banir fillers do Jogo 1 para forçar variação
         fillers_g1 = [x for x in g1 if x not in mandatories_g1]
         banned_for_g2 = set(fillers_g1[:4])
         
-        g2, msg2 = generate_game_architect(
-            10, mandatories_g2, banned_for_g2, last_draw_set, engine.universe, rsi_weights, force_start=True
+        g2, msg2 = generate_game_sniper(
+            10, mandatories_g2, banned_for_g2, last_draw_set, engine.universe, rsi_weights, force_start_limit=3, max_sum=210
         )
         games_output.append({
             "Title": "JOGO 2: TENDÊNCIA",
             "Game": g2, "Type": "VARIAÇÃO",
-            "Reason": f"Deixou o {list(left_out_g2)} propositalmente de fora.",
+            "Reason": f"Deixou o {list(left_out_g2)} de fora. Soma ajustada.",
             "Special": mandatories_g2
         })
 
         # --- JOGO 3: RESGATE (O CORRETOR) ---
-        # 1. Recuperação Global (Quem ninguém jogou)
         used_numbers = set(g1) | set(g2)
         forgotten_numbers = engine.universe - used_numbers
-        
-        # 2. Recuperação de Críticos (Quem o Jogo 2 deixou de fora)
-        # O Jogo 3 PRECISA ter o número que o Jogo 2 excluiu (ex: 22)
         dropped_criticals = left_out_g2
         
-        # Obrigatórios do Jogo 3 = Esquecidos Globais + Crítico que sobrou
         mandatories_g3 = forgotten_numbers | dropped_criticals
-        
-        # Banimentos: Tenta banir o que foi muito usado, mas respeita os mandatories
         banned_g3 = set(critical_all) - mandatories_g3
         
-        g3, msg3 = generate_game_architect(
-            8, mandatories_g3, banned_g3, last_draw_set, engine.universe, rsi_weights, force_start=True
+        g3, msg3 = generate_game_sniper(
+            8, mandatories_g3, banned_g3, last_draw_set, engine.universe, rsi_weights, force_start_limit=3, max_sum=210
         )
         
-        # Fallback se travar
         if not g3:
-            g3, msg3 = generate_game_architect(
-                8, mandatories_g3, set(), last_draw_set, engine.universe, rsi_weights, force_start=True
+            g3, msg3 = generate_game_sniper(
+                8, mandatories_g3, set(), last_draw_set, engine.universe, rsi_weights, force_start_limit=3, max_sum=210
             )
             
         reason_txt = f"🌐 CERCAMENTO: Resgatou {sorted(list(forgotten_numbers))} e o crítico {list(dropped_criticals)}."
@@ -305,8 +327,8 @@ if df is not None:
             "Title": "JOGO 3: RESGATE (ZEBRA)",
             "Game": g3, "Type": "GLOBAL",
             "Reason": reason_txt,
-            "Special": dropped_criticals, # Vai ficar Roxo
-            "Forgotten": forgotten_numbers # Vai ficar Vermelho
+            "Special": dropped_criticals,
+            "Forgotten": forgotten_numbers 
         })
         
         # RENDER
@@ -318,10 +340,12 @@ if df is not None:
             txt_download += f"{g_data['Title']}: {nums}\n"
             rep_count = len(set(nums) & last_draw_set)
             
-            # Auditoria de Linhas
             lines = [0]*5
             for n in nums: lines[(n-1)//5] += 1
             line_str = "-".join(map(str, lines))
+            
+            game_sum = sum(nums)
+            sum_class = "success-tag" if game_sum <= 210 else "alert-tag"
             
             special_nums = g_data.get("Special", set())
             forgotten_nums = g_data.get("Forgotten", set())
@@ -337,7 +361,7 @@ if df is not None:
                     <div style='display:flex; justify-content:space-between; margin-bottom:10px; font-size:12px; color:#666;'>
                         <span>REPETIDAS: <span class='success-tag'>{rep_count}</span></span>
                         <span>LINHAS: {line_str}</span>
-                        <span>SOMA: {sum(nums)}</span>
+                        <span>SOMA: <span class='{sum_class}'>{game_sum}</span></span>
                     </div>
                 """, unsafe_allow_html=True)
                 
@@ -345,13 +369,13 @@ if df is not None:
                 html = ""
                 for n in nums:
                     css = ""
-                    if n in forgotten_nums: css = "b-esq" # Vermelho
-                    elif n in special_nums: css = "b-fixa" # Roxo
-                    elif n in last_draw_set: css = "b-rep" # Verde
+                    if n in forgotten_nums: css = "b-esq" 
+                    elif n in special_nums: css = "b-fixa"
+                    elif n in last_draw_set: css = "b-rep"
                     html += f"<div class='ball {css}'>{n:02d}</div>"
                 st.markdown(f"<div class='ball-grid'>{html}</div></div>", unsafe_allow_html=True)
 
-        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v10.txt")
+        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v101.txt")
 
 else:
     st.error("Erro de conexão. Tente recarregar.")
