@@ -9,8 +9,8 @@ import re
 
 # --- 1. CONFIGURAÇÃO SYSTEM KERNEL ---
 st.set_page_config(
-    page_title="LotoQuant | MAESTRO V15.0",
-    page_icon="🎼",
+    page_title="LotoQuant | STRATEGIST V16.0",
+    page_icon="♟️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -109,24 +109,38 @@ class LotoEngine:
             weights[num] = count * 10 
         return weights
 
-# --- 4. THE SHERIFF (VALIDATOR) ---
-def validate_game_rules(game: List[int], engine: LotoEngine) -> Tuple[bool, str]:
+# --- 4. THE SHERIFF (VALIDATOR V16) ---
+def validate_game_tactical(
+    game: List[int], 
+    engine: LotoEngine, 
+    target_odd: int, 
+    strict_sum: bool = True
+) -> Tuple[bool, str]:
+    
     g_set = set(game)
     report = ""
     valid = True
     
-    # 1. Pontas
+    # 1. Pontas (01/02 e 24/25)
     ponta_ini = game[0] <= 2
     ponta_fim = game[-1] >= 24
     if ponta_ini and ponta_fim: report += f"Pontas: {game[0]:02d} / {game[-1]:02d} ✅\n"
     else: report += f"Pontas: {game[0]:02d} / {game[-1]:02d} ❌\n"; valid = False
 
-    # 2. Ímpares/Pares (7 ou 8)
+    # 2. Ímpares (Soberano)
     impares = len([x for x in game if x % 2 != 0])
     pares = 15 - impares
-    if 7 <= impares <= 8: report += f"Ímpares: {impares} | Pares: {pares} ✅\n"
-    else: report += f"Ímpares: {impares} | Pares: {pares} ❌\n"; valid = False
-        
+    
+    # Validação exata do alvo (8 ou 7)
+    if impares == target_odd:
+        report += f"Ímpares: {impares} | Pares: {pares} ✅ (Alvo Atingido)\n"
+    else:
+        # Tolerância de +/- 1 apenas se não for Zebra Estrita
+        if abs(impares - target_odd) <= 0: # Sem tolerância para teste rigoroso
+             report += f"Ímpares: {impares} | Pares: {pares} ❌ (Meta era {target_odd})\n"; valid = False
+        else:
+             report += f"Ímpares: {impares} ❌\n"; valid = False
+
     # 3. Moldura (9 ou 10)
     moldura = len(g_set.intersection(engine.MOLDURA))
     if 9 <= moldura <= 10: report += f"Moldura: {moldura} ✅\n"
@@ -137,11 +151,15 @@ def validate_game_rules(game: List[int], engine: LotoEngine) -> Tuple[bool, str]
     if 4 <= n_primos <= 6: report += f"Primos: {n_primos} ✅\n"
     else: report += f"Primos: {n_primos} ❌\n"; valid = False
         
-    # 5. Soma (180 a 210)
+    # 5. Soma (180 a 210) - RELAXÁVEL no J3
     soma = sum(game)
-    if 180 <= soma <= 215: # Tolerância leve para Zebra
+    if 180 <= soma <= 210: 
         report += f"Soma: {soma} ✅\n"
-    else: report += f"Soma: {soma} ⚠️ (Fora do Padrão)\n"; valid = False
+    else: 
+        if strict_sum:
+            report += f"Soma: {soma} ❌ (Rigorosa)\n"; valid = False
+        else:
+            report += f"Soma: {soma} ⚠️ (Liberada p/ manter Paridade)\n"
         
     # 6. Sequência (Max 4)
     max_seq = 0; curr_seq = 1
@@ -155,14 +173,16 @@ def validate_game_rules(game: List[int], engine: LotoEngine) -> Tuple[bool, str]
     
     return valid, report
 
-# --- 5. THE GENERATOR (BRUTE FORCE + MEMORY) ---
-def generate_strict_game(
+# --- 5. THE GENERATOR (TACTICAL) ---
+def generate_tactical_game(
     target_repeats: int, 
     mandatory_nums: Set[int], 
     banned_nums: Set[int],
     engine: LotoEngine,
     weights: Dict[int, float],
-    max_attempts: int = 3000
+    target_odd_count: int, # NOVO: Meta explícita de ímpares
+    strict_sum_rule: bool = True,
+    max_attempts: int = 5000
 ) -> Tuple[List[int], str, str]:
     
     last_draw = engine.last_draw
@@ -172,42 +192,40 @@ def generate_strict_game(
         pool_repeats = list(last_draw - banned_nums)
         pool_absents = list((universe - last_draw) - banned_nums)
         
-        # Shuffle inteligente (Variabilidade)
         np.random.shuffle(pool_repeats)
         np.random.shuffle(pool_absents)
         
-        # Obrigatórios
         sel_rep = list(mandatory_nums.intersection(last_draw))
         sel_abs = list(mandatory_nums.intersection(universe - last_draw))
         
-        # Preenchimento
         need_rep = target_repeats - len(sel_rep)
-        if len(pool_repeats) >= need_rep:
-            # Pega os melhores RSI dentro do shuffle
-            pool_repeats.sort(key=lambda x: weights.get(x, 0), reverse=True)
-            # Pega uma fatia aleatória dos melhores para não viciar
-            candidates_rep = pool_repeats[:need_rep + 4]
-            np.random.shuffle(candidates_rep)
-            sel_rep += candidates_rep[:need_rep]
-        else: continue 
-
+        if len(pool_repeats) < need_rep: continue
+        
+        # Seleção com viés RSI
+        pool_repeats.sort(key=lambda x: weights.get(x, 0), reverse=True)
+        candidates_rep = pool_repeats[:need_rep + 6] 
+        np.random.shuffle(candidates_rep)
+        sel_rep += candidates_rep[:need_rep]
+        
         slots = 15 - len(sel_rep) - len(sel_abs)
-        if len(pool_absents) >= slots:
-            pool_absents.sort(key=lambda x: weights.get(x, 0), reverse=True)
-            candidates_abs = pool_absents[:slots + 4]
-            np.random.shuffle(candidates_abs)
-            sel_abs += candidates_abs[:slots]
-        else: continue
+        if len(pool_absents) < slots: continue
+
+        pool_absents.sort(key=lambda x: weights.get(x, 0), reverse=True)
+        candidates_abs = pool_absents[:slots + 6]
+        np.random.shuffle(candidates_abs)
+        sel_abs += candidates_abs[:slots]
         
         candidate = sorted(sel_rep + sel_abs)
         
-        # TRIBUNAL
-        is_valid, report = validate_game_rules(candidate, engine)
+        # TRIBUNAL TÁTICO
+        is_valid, report = validate_game_tactical(
+            candidate, engine, target_odd_count, strict_sum_rule
+        )
         
         if is_valid:
             return candidate, "JOGO APROVADO", report
     
-    return [], "FALHA DE ALINHAMENTO", ""
+    return [], "FALHA ESTATÍSTICA", ""
 
 # --- 6. UI LAYER ---
 df = fetch_data()
@@ -220,134 +238,110 @@ if df is not None:
     rsi_weights = engine.get_rsi_score()
     last_contest = df.iloc[-1]
     
-    # SIDEBAR
-    st.sidebar.title("🧾 CONFERIDOR")
-    st.sidebar.markdown(f"**Base:** Concurso {last_contest['id']}")
-    uploaded_file = st.sidebar.file_uploader("Carregar .txt", type="txt")
-    manual_input = st.sidebar.text_area("Colar jogos:", height=100)
-    
-    games_to_check = []
-    if uploaded_file:
-        stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-        for line in stringio:
-            nums = [int(n) for n in re.findall(r'\d+', line)][:15]
-            if len(nums) == 15: games_to_check.append(nums)
-    elif manual_input:
-        raw = [int(n) for n in re.findall(r'\d+', manual_input)]
-        for i in range(0, len(raw), 15):
-            if len(raw[i:i+15]) == 15: games_to_check.append(raw[i:i+15])
-            
-    if games_to_check:
-        st.sidebar.markdown("---")
-        total_prize = 0
-        for i, game in enumerate(games_to_check):
-            hits = len(set(game) & set(last_contest['draw']))
-            css_class = ""
-            money = 0
-            if hits == 11: css_class="win-11"; money=6
-            if hits == 12: css_class="win-12"; money=12
-            if hits >= 13: css_class="win-13"; money=30
-            total_prize += money
-            st.sidebar.markdown(f"<div class='result-box {css_class}'>Jogo {i+1}: <b style='color:#fff'>{hits} Pts</b></div>", unsafe_allow_html=True)
-        if total_prize > 0: st.sidebar.success(f"💰 R$ {total_prize},00")
-        else: st.sidebar.warning("Sem prêmio.")
-
     # MAIN SCREEN
     critical_all = [k for k,v in delays.items() if v >= 2]
     critical_all.sort(key=lambda x: delays[x], reverse=True)
     
-    st.title("LOTOQUANT MAESTRO V15.0")
-    st.markdown(f"**CONCURSO:** {last_contest['id']} | **MEMÓRIA SEQUENCIAL:** ATIVA")
+    # DIVISÃO DE FORÇAS (A e B)
+    # Garante que temos pelo menos 2 números para cada lado. Se tiver menos de 4, repete.
+    if len(critical_all) >= 4:
+        squad_a = critical_all[:2] # Para J2
+        squad_b = critical_all[2:4] # Para J3
+    elif len(critical_all) >= 2:
+        squad_a = [critical_all[0]]
+        squad_b = [critical_all[1]]
+    else:
+        squad_a = critical_all
+        squad_b = critical_all
     
-    c1, c2 = st.columns(2)
-    c1.info(f"🚨 **ATRASADOS:** {critical_all}")
-    c2.success(f"🎼 **SINCRONIA:** J1 ➔ J2 ➔ J3 (Zero Loss)")
+    st.title("LOTOQUANT STRATEGIST V16.0")
+    st.markdown(f"**CONCURSO:** {last_contest['id']} | **DIVISÃO TÁTICA:** A/B")
+    
+    c1, c2, c3 = st.columns(3)
+    c1.success(f"🦅 **J1:** Força Total {critical_all}")
+    c2.info(f"🌊 **J2:** Esquadrão A {squad_a}")
+    c3.warning(f"🛡️ **J3:** Esquadrão B {squad_b}")
 
-    if st.button("EXECUTAR PROTOCOLO MAESTRO"):
+    if st.button("EXECUTAR ESTRATÉGIA MILITAR"):
         games_output = []
         progress_bar = st.progress(0)
-        status_text = st.empty()
         
-        # --- JOGO 1: O SOLISTA ---
-        status_text.text("Gerando Jogo 1 (Sniper)...")
-        mandatories_g1 = set(cycle + critical_all[:4]) 
-        g1, status1, report1 = generate_strict_game(
-            9, mandatories_g1, set(), engine, rsi_weights
+        # --- JOGO 1: CARGA TOTAL ---
+        # Regra: Todos os atrasados. 8 Ímpares.
+        mandatories_g1 = set(cycle + critical_all) # Todos
+        g1, status1, report1 = generate_tactical_game(
+            9, mandatories_g1, set(), engine, rsi_weights, target_odd_count=8, strict_sum_rule=True
         )
         if g1:
             games_output.append({
-                "Title": "JOGO 1: SNIPER", "Game": g1, 
-                "Reason": "Base Sólida.", "Report": report1, 
-                "Special": mandatories_g1
+                "Title": "JOGO 1: SNIPER (TOTAL)", "Game": g1, 
+                "Reason": "Força Máxima + Padrão 8 Ímpares.", "Report": report1, "Special": mandatories_g1
             })
         progress_bar.progress(33)
         
-        # --- JOGO 2: O DUETO (ANTI-CLONE) ---
-        status_text.text("Gerando Jogo 2 (Tendência)...")
-        if len(critical_all) > 1:
-            left_out_g2 = {critical_all[-1]} 
-            mandatories_g2 = set(cycle + critical_all[:-1])
-        else:
-            left_out_g2 = set()
-            mandatories_g2 = set(cycle + critical_all)
-
-        # AQUI ESTÁ A MEMÓRIA: Bani fillers do J1
+        # --- JOGO 2: ESQUADRÃO A ---
+        # Regra: Só Atrasados A. PROIBIDO Atrasados B. 8 Ímpares.
+        mandatories_g2 = set(cycle + squad_a)
+        # Banimos o Squad B para garantir a divisão, e alguns fillers do J1 para variar
         fillers_g1 = [x for x in g1 if x not in mandatories_g1]
-        banned_for_g2 = set(fillers_g1[:4])
+        banned_g2 = set(squad_b) | set(fillers_g1[:3])
         
-        g2, status2, report2 = generate_strict_game(
-            10, mandatories_g2, banned_for_g2, engine, rsi_weights
+        g2, status2, report2 = generate_tactical_game(
+            10, mandatories_g2, banned_g2, engine, rsi_weights, target_odd_count=8, strict_sum_rule=True
         )
+        
+        # Fallback: Se travar, libera os fillers do J1, mas mantém proibição do Squad B
+        if not g2:
+             g2, status2, report2 = generate_tactical_game(
+                10, mandatories_g2, set(squad_b), engine, rsi_weights, target_odd_count=8, strict_sum_rule=True
+            )
+
         if g2:
-            # Adiciona nota de memória na auditoria
-            report2 += f"\n🔗 Memória: Divergiu de {len(banned_for_g2)} números do J1."
+            report2 += f"\n⚔️ Divisão: Usou {squad_a}, Baniu {squad_b}."
             games_output.append({
-                "Title": "JOGO 2: TENDÊNCIA", "Game": g2, 
-                "Reason": "Variação Tática.", "Report": report2, 
-                "Special": mandatories_g2
+                "Title": "JOGO 2: TENDÊNCIA (SQUAD A)", "Game": g2, 
+                "Reason": "Divisão A + Padrão 8 Ímpares.", "Report": report2, "Special": mandatories_g2
             })
         progress_bar.progress(66)
 
-        # --- JOGO 3: O GRANDE FINAL (RESGATE) ---
-        status_text.text("Gerando Jogo 3 (Resgate Global)...")
+        # --- JOGO 3: ESQUADRÃO B (ZEBRA) ---
+        # Regra: Só Atrasados B. PROIBIDO Atrasados A. 7 Ímpares (Inverso).
+        # + Resgate Global
         
-        # AQUI ESTÁ A MEMÓRIA GLOBAL:
         used_numbers = set(g1) | set(g2)
         forgotten_numbers = engine.universe - used_numbers
-        dropped_criticals = left_out_g2
         
-        mandatories_g3 = forgotten_numbers | dropped_criticals
+        # Obrigatórios: Squad B + Esquecidos
+        mandatories_g3 = set(squad_b) | forgotten_numbers
         
-        # Tenta banir críticos já usados, mas prioriza a validação
-        banned_g3 = set(critical_all) - mandatories_g3
+        # Banidos: Squad A (Se possível)
+        banned_g3 = set(squad_a)
         
-        g3, status3, report3 = generate_strict_game(
-            8, mandatories_g3, banned_g3, engine, rsi_weights
+        # Zebra: Meta 7 Ímpares. Strict Sum = False (Afrouxa soma pra garantir paridade)
+        g3, status3, report3 = generate_tactical_game(
+            8, mandatories_g3, banned_g3, engine, rsi_weights, target_odd_count=7, strict_sum_rule=False
         )
         
-        # Fallback de segurança (se a matemática for impossível com banimento)
+        # Fallback
         if not g3:
-             g3, status3, report3 = generate_strict_game(
-                8, mandatories_g3, set(), engine, rsi_weights
+             g3, status3, report3 = generate_tactical_game(
+                8, mandatories_g3, set(), engine, rsi_weights, target_odd_count=7, strict_sum_rule=False
             )
 
         if g3:
-            report3 += f"\n🔗 Memória: Resgatou {len(forgotten_numbers)} números esquecidos."
+            report3 += f"\n⚔️ Divisão: Usou {squad_b}. Inverteu para 7 Ímpares."
+            report3 += f"\n🔗 Resgate: {len(forgotten_numbers)} números."
             games_output.append({
-                "Title": "JOGO 3: RESGATE (ZEBRA)", "Game": g3, 
-                "Reason": "Cobertura Total.", "Report": report3, 
-                "Special": dropped_criticals, "Forgotten": forgotten_numbers 
+                "Title": "JOGO 3: RESGATE (SQUAD B)", "Game": g3, 
+                "Reason": "Divisão B + Zebra 7 Ímpares + Resgate.", "Report": report3, 
+                "Special": set(squad_b), "Forgotten": forgotten_numbers 
             })
         progress_bar.progress(100)
-        status_text.text("Protocolo Concluído.")
         
         # RENDER
-        txt_download = ""
         for g_data in games_output:
             nums = g_data["Game"]
             if not nums: continue 
-            
-            txt_download += f"{g_data['Title']}: {nums}\n"
             
             special_nums = g_data.get("Special", set())
             forgotten_nums = g_data.get("Forgotten", set())
@@ -357,7 +351,7 @@ if df is not None:
                 <div class='game-card'>
                     <div class='card-header'>
                         <span style='color:#fff; font-weight:bold'>{g_data['Title']}</span>
-                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V15.0</span>
+                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V16.0</span>
                     </div>
                 """, unsafe_allow_html=True)
                 
@@ -373,10 +367,6 @@ if df is not None:
                 st.markdown(f"<div class='ball-grid'>{html}</div>", unsafe_allow_html=True)
                 
                 st.markdown(f"<div class='audit-box'>{g_data['Report']}</div></div>", unsafe_allow_html=True)
-                
-                txt_download += g_data['Report'].replace("✅", "[OK]").replace("❌", "[ERRO]").replace("⚠️", "[ALERTA]") + "\n" + "-"*30 + "\n"
-
-        st.download_button("💾 BAIXAR DOSSIÊ COMPLETO (.TXT)", txt_download, "dossie_lotoquant_v15.txt")
 
 else:
     st.error("Erro de conexão. Tente recarregar.")
