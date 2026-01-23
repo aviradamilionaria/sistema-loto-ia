@@ -8,8 +8,8 @@ from typing import List, Set, Dict, Tuple, Optional
 
 # --- 1. CONFIGURAÇÃO SYSTEM KERNEL ---
 st.set_page_config(
-    page_title="LotoQuant | REPAIR V19.0",
-    page_icon="🔧",
+    page_title="LotoQuant | ELITE V20.0",
+    page_icon="💎",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -44,7 +44,6 @@ st.markdown("""
         white-space: pre-line;
     }
     
-    /* Conferidor */
     .result-box { border-left: 5px solid #333; padding: 10px; margin-bottom: 5px; background: #0a0a0a; font-size: 14px;}
     .win-11 { border-left-color: #e69138; }
     .win-12 { border-left-color: #f1c232; }
@@ -113,48 +112,52 @@ class LotoEngine:
             weights[num] = count * 10 
         return weights
 
-# --- 4. THE VALIDATOR (V19 - STRICT) ---
-def validate_game_repair(
+# --- 4. THE VALIDATOR (V20 - OPENING ELITE) ---
+def validate_game_elite(
     game: List[int], 
     engine: LotoEngine, 
     target_odd: int, 
     strict_sum: bool = True,
-    elite_mode: bool = False # Se True, rejeita abertura fraca
+    opening_level: int = 1 # 1=Ouro(J1), 2=Prata(J2), 3=Bronze(J3)
 ) -> Tuple[bool, str]:
     
     g_set = set(game)
+    if len(g_set) != 15: return False, "ERRO: Duplicidade"
     
-    # 0. CHECAGEM DE DUPLICIDADE (CRÍTICO)
-    if len(g_set) != 15:
-        return False, f"ERRO FATAL: Duplicidade encontrada ({15-len(g_set)} repetidos). ❌"
-        
     report = ""
     valid = True
     
-    # 1. ABERTURA (CORRIGIDO PARA ELITE)
+    # 1. HIERARQUIA DE ABERTURA (V20)
     start_ok = False
     start_msg = "❌"
     
-    if game[0] == 1 and game[1] == 2:
-        start_msg = "✅ (Padrão Ouro)"
-        start_ok = True
-    elif game[0] == 1 and game[1] == 3:
-        start_msg = "✅ (Padrão Prata)"
-        start_ok = True
-    elif game[0] == 2:
-        start_msg = "✅ (Padrão Bronze)"
-        start_ok = True
-    elif game[0] == 1 and game[1] == 4:
-        if elite_mode:
-            start_msg = "❌ (Rejeitado no J1)" # Jogo 1 não aceita isso
-            start_ok = False
-        else:
-            start_msg = "⚠️ (Limite Aceitável)"
-            start_ok = True
-    else:
-        start_msg = f"❌ (Inaceitável: {game[0]}-{game[1]})"
-        start_ok = False
+    pair = (game[0], game[1])
+    
+    # NÍVEL 1: JOGO 1 (Apenas a Elite Absoluta)
+    if opening_level == 1:
+        if pair == (1, 2): start_msg = "✅ (Ouro)"; start_ok = True
+        elif pair == (1, 3): start_msg = "✅ (Prata)"; start_ok = True
+        else: start_msg = "❌ (Exige 01-02 ou 01-03)"; start_ok = False
         
+    # NÍVEL 2: JOGO 2 (Elite + Alternativas Fortes)
+    elif opening_level == 2:
+        if pair == (1, 2): start_msg = "✅ (Ouro)"; start_ok = True
+        elif pair == (1, 3): start_msg = "✅ (Prata)"; start_ok = True
+        elif pair == (2, 3): start_msg = "✅ (Bronze)"; start_ok = True
+        elif pair == (2, 4): start_msg = "✅ (Aço)"; start_ok = True
+        # 01-04 AGORA É PROIBIDO NO NÍVEL 2
+        elif pair == (1, 4): start_msg = "❌ (Fraco: 01-04)"; start_ok = False 
+        else: start_msg = f"❌ (Fraco: {pair})"; start_ok = False
+        
+    # NÍVEL 3: JOGO 3 (Zebra/Resgate - Aceita tudo que não for buraco absurdo)
+    else: 
+        if pair in [(1,2), (1,3), (1,4), (2,3), (2,4), (3,4)]:
+            start_msg = "✅ (Válido Zebra)"; start_ok = True
+        else:
+            # Só rejeita se o buraco for > 3
+            if game[1] - game[0] > 3: start_msg = "❌ (Buraco Grande)"; start_ok = False
+            else: start_msg = "⚠️ (Resgate)"; start_ok = True
+
     end_ok = game[-1] >= 24
     
     if start_ok and end_ok:
@@ -166,17 +169,15 @@ def validate_game_repair(
     # 2. Ímpares
     impares = len([x for x in game if x % 2 != 0])
     pares = 15 - impares
-    if impares == target_odd:
-        report += f"Ímpares: {impares} | Pares: {pares} ✅\n"
-    else:
-        report += f"Ímpares: {impares} ❌ (Meta: {target_odd})\n"; valid = False
+    if impares == target_odd: report += f"Ímpares: {impares} | Pares: {pares} ✅\n"
+    else: report += f"Ímpares: {impares} ❌ (Meta: {target_odd})\n"; valid = False
 
-    # 3. Moldura (9 ou 10)
+    # 3. Moldura
     moldura = len(g_set.intersection(engine.MOLDURA))
     if 9 <= moldura <= 10: report += f"Moldura: {moldura} ✅\n"
     else: report += f"Moldura: {moldura} ❌\n"; valid = False
 
-    # 4. Primos (4 a 6)
+    # 4. Primos
     n_primos = len(g_set.intersection(engine.PRIMOS))
     if 4 <= n_primos <= 6: report += f"Primos: {n_primos} ✅\n"
     else: report += f"Primos: {n_primos} ❌\n"; valid = False
@@ -188,7 +189,7 @@ def validate_game_repair(
         if strict_sum: report += f"Soma: {soma} ❌\n"; valid = False
         else: report += f"Soma: {soma} ⚠️ (Zebra)\n"
         
-    # 6. Sequência (Max 4)
+    # 6. Sequência
     max_seq = 0; curr_seq = 1
     for i in range(len(game)-1):
         if game[i+1] == game[i] + 1: curr_seq += 1
@@ -200,8 +201,8 @@ def validate_game_repair(
     
     return valid, report
 
-# --- 5. GENERATOR (REPAIR) ---
-def generate_repair_game(
+# --- 5. GENERATOR ---
+def generate_elite_game(
     target_repeats: int, 
     mandatory_nums: Set[int], 
     banned_nums: Set[int],
@@ -209,20 +210,18 @@ def generate_repair_game(
     weights: Dict[int, float],
     target_odd_count: int, 
     strict_sum_rule: bool = True,
-    elite_mode: bool = False,
-    max_attempts: int = 10000
+    opening_level: int = 1,
+    max_attempts: int = 15000
 ) -> Tuple[List[int], str, str]:
     
     last_draw = engine.last_draw
     universe = engine.universe
     
     for _ in range(max_attempts):
-        # 1. IDENTIFICAR OBRIGATÓRIOS JÁ SELECIONADOS
         sel_rep = list(mandatory_nums.intersection(last_draw))
         sel_abs = list(mandatory_nums.intersection(universe - last_draw))
         
-        # 2. LIMPAR OS POOLS (CORREÇÃO DA DUPLICIDADE)
-        # Removemos Banned E TAMBÉM os Mandatory já selecionados
+        # Limpeza de Pool Anti-Duplicidade
         pool_repeats = list(last_draw - banned_nums - set(sel_rep))
         pool_absents = list((universe - last_draw) - banned_nums - set(sel_abs))
         
@@ -245,13 +244,12 @@ def generate_repair_game(
         np.random.shuffle(candidates_abs)
         sel_abs += candidates_abs[:slots]
         
-        # 3. VERIFICAÇÃO FINAL DE UNICIDADE
         candidate = sorted(sel_rep + sel_abs)
-        if len(set(candidate)) != 15: continue # Segurança extra
+        if len(set(candidate)) != 15: continue
         
-        # TRIBUNAL
-        is_valid, report = validate_game_repair(
-            candidate, engine, target_odd_count, strict_sum_rule, elite_mode
+        # TRIBUNAL ELITE
+        is_valid, report = validate_game_elite(
+            candidate, engine, target_odd_count, strict_sum_rule, opening_level
         )
         
         if is_valid:
@@ -270,7 +268,7 @@ if df is not None:
     rsi_weights = engine.get_rsi_score()
     last_contest = df.iloc[-1]
     
-    # CONFERIDOR
+    # SIDEBAR
     st.sidebar.title("🧾 CONFERIDOR")
     st.sidebar.markdown(f"**Base:** Concurso {last_contest['id']}")
     uploaded_file = st.sidebar.file_uploader("Carregar .txt", type="txt")
@@ -318,68 +316,70 @@ if df is not None:
         squad_a = critical_all
         squad_b = critical_all
     
-    st.title("LOTOQUANT REPAIR V19.0")
-    st.markdown(f"**CONCURSO:** {last_contest['id']} | **INTEGRIDADE:** ANTI-DUPLICIDADE ATIVA")
+    st.title("LOTOQUANT ELITE V20.0")
+    st.markdown(f"**CONCURSO:** {last_contest['id']} | **ABERTURA:** HIERARQUIA REFINADA")
     
     c1, c2, c3 = st.columns(3)
-    c1.success(f"🦅 **J1:** Elite (01-02/03)")
-    c2.info(f"🌊 **J2:** Esquadrão A {squad_a}")
-    c3.warning(f"🛡️ **J3:** Esquadrão B {squad_b}")
+    c1.success(f"🦅 **J1:** Ouro (01-02/03)")
+    c2.info(f"🌊 **J2:** Prata/Bronze (Sem 01-04)")
+    c3.warning(f"🛡️ **J3:** Resgate (Livre)")
 
-    if st.button("GERAR CERCAMENTO PERFEITO"):
+    if st.button("GERAR COM ABERTURA DE ELITE"):
         games_output = []
         progress_bar = st.progress(0)
         
-        # --- JOGO 1 ---
+        # --- JOGO 1 (Opening Level 1 - OURO) ---
         mandatories_g1 = set(cycle + critical_all)
-        # Elite Mode = True (Rejeita 01-04)
-        g1, status1, report1 = generate_repair_game(
-            9, mandatories_g1, set(), engine, rsi_weights, target_odd_count=8, elite_mode=True
+        g1, status1, report1 = generate_elite_game(
+            9, mandatories_g1, set(), engine, rsi_weights, target_odd_count=8, 
+            opening_level=1 # Só aceita 01-02 ou 01-03
         )
         if g1:
             games_output.append({
-                "Title": "JOGO 1: SNIPER (ELITE)", "Game": g1, 
-                "Reason": "Força Máxima + Abertura Ouro.", "Report": report1, "Special": mandatories_g1
+                "Title": "JOGO 1: SNIPER (OURO)", "Game": g1, 
+                "Reason": "Força Máxima.", "Report": report1, "Special": mandatories_g1
             })
         progress_bar.progress(33)
         
-        # --- JOGO 2 ---
+        # --- JOGO 2 (Opening Level 2 - PRATA/BRONZE) ---
         mandatories_g2 = set(cycle + squad_a)
         fillers_g1 = [x for x in g1 if x not in mandatories_g1]
         banned_g2 = set(squad_b) | set(fillers_g1[:3])
         
-        # Elite Mode = True (Rejeita 01-04 aqui também, pois é jogo forte)
-        g2, status2, report2 = generate_repair_game(
-            10, mandatories_g2, banned_g2, engine, rsi_weights, target_odd_count=8, elite_mode=True
+        g2, status2, report2 = generate_elite_game(
+            10, mandatories_g2, banned_g2, engine, rsi_weights, target_odd_count=8,
+            opening_level=2 # Aceita 01-02, 01-03, 02-03, 02-04. REJEITA 01-04.
         )
         
         if not g2:
-             g2, status2, report2 = generate_repair_game(
-                10, mandatories_g2, set(squad_b), engine, rsi_weights, target_odd_count=8, elite_mode=False
+             g2, status2, report2 = generate_elite_game(
+                10, mandatories_g2, set(squad_b), engine, rsi_weights, target_odd_count=8,
+                opening_level=2
             )
              report2 += "\n🛡️ Persistência: Banimento relaxado."
 
         if g2:
             games_output.append({
-                "Title": "JOGO 2: TENDÊNCIA (SQUAD A)", "Game": g2, 
-                "Reason": "Variação Controlada.", "Report": report2, "Special": mandatories_g2
+                "Title": "JOGO 2: TENDÊNCIA (PRATA)", "Game": g2, 
+                "Reason": "Variação s/ Abertura Fraca.", "Report": report2, "Special": mandatories_g2
             })
         progress_bar.progress(66)
 
-        # --- JOGO 3 ---
+        # --- JOGO 3 (Opening Level 3 - ZEBRA) ---
         used_numbers = set(g1) | set(g2)
         forgotten_numbers = engine.universe - used_numbers
         mandatories_g3 = set(squad_b) | forgotten_numbers
         banned_g3 = set(squad_a)
         
-        # Jogo 3 (Zebra) aceita abertura mais solta (Elite=False)
-        g3, status3, report3 = generate_repair_game(
-            8, mandatories_g3, banned_g3, engine, rsi_weights, target_odd_count=7, strict_sum_rule=False, elite_mode=False
+        g3, status3, report3 = generate_elite_game(
+            8, mandatories_g3, banned_g3, engine, rsi_weights, target_odd_count=7, 
+            strict_sum_rule=False, opening_level=3 # Aceita qualquer coisa que não seja buraco > 3
         )
         
         if not g3:
-             g3, status3, report3 = generate_repair_game(
-                8, mandatories_g3, set(), engine, rsi_weights, target_odd_count=7, strict_sum_rule=False, elite_mode=False
+             g3, status3, report3 = generate_elite_game(
+                8, mandatories_g3, set(), engine, rsi_weights, target_odd_count=7, 
+                strict_sum_rule=False, opening_level=3
             )
 
         if g3:
@@ -406,7 +406,7 @@ if df is not None:
                 <div class='game-card'>
                     <div class='card-header'>
                         <span style='color:#fff; font-weight:bold'>{g_data['Title']}</span>
-                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V19.0</span>
+                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V20.0</span>
                     </div>
                 """, unsafe_allow_html=True)
                 
@@ -425,7 +425,7 @@ if df is not None:
                 
                 txt_download += g_data['Report'].replace("✅", "[OK]").replace("❌", "[ERRO]").replace("⚠️", "[ALERTA]") + "\n" + "-"*30 + "\n"
 
-        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v19.txt")
+        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v20.txt")
 
 else:
     st.error("Erro de conexão. Tente recarregar.")
