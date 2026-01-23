@@ -8,8 +8,8 @@ import re
 
 # --- 1. CONFIGURAÇÃO SYSTEM KERNEL ---
 st.set_page_config(
-    page_title="LotoQuant | SNIPER V10.1",
-    page_icon="🎯",
+    page_title="LotoQuant | ANCHOR V10.2",
+    page_icon="⚓",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -35,8 +35,8 @@ st.markdown("""
         border-radius: 50%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-weight: bold; 
     }
     
-    .b-fixa { border-color: #a371f7; color: #a371f7; box-shadow: 0 0 5px #a371f744; } /* Obrigatório */
-    .b-esq { border-color: #ff4b4b; color: #ff4b4b; box-shadow: 0 0 8px #ff4b4b44; } /* Esquecido (Resgatado) */
+    .b-fixa { border-color: #a371f7; color: #a371f7; box-shadow: 0 0 5px #a371f744; } 
+    .b-esq { border-color: #ff4b4b; color: #ff4b4b; box-shadow: 0 0 8px #ff4b4b44; } 
     .b-rep { border-color: #238636; color: #238636; }
     .success-tag { color: #238636; font-weight: bold; }
     .alert-tag { color: #d29922; font-weight: bold; }
@@ -108,16 +108,15 @@ class LotoEngine:
             weights[num] = count * 10 
         return weights
 
-# --- 4. DETERMINISTIC GENERATOR (SNIPER EDITION) ---
-def generate_game_sniper(
+# --- 4. DETERMINISTIC GENERATOR (ANCHOR EDITION) ---
+def generate_game_anchor(
     target_repeats: int, 
     mandatory_nums: Set[int], 
     banned_nums: Set[int],
     last_draw: Set[int],
     universe: Set[int],
     weights: Dict[int, float],
-    force_start_limit: int = 3, # Começar no máximo com 03
-    max_sum: int = 210 # Soma Máxima Tolerada
+    max_sum: int = 210
 ) -> Tuple[List[int], str]:
     
     # 1. Preparação dos Pools
@@ -130,32 +129,28 @@ def generate_game_sniper(
     selected_repeats = list(mandatory_in_repeats)
     selected_absents = list(mandatory_in_absents)
     
-    # 2. TRAVA DE INÍCIO RIGOROSA (1 a 3)
-    # Verifica se já tem alguém <= 3
-    has_start = any(n <= force_start_limit for n in (selected_repeats + selected_absents))
-    
+    # 2. TRAVA DE PONTA (ANCHOR LOCK) - OBRIGATÓRIO
+    # Garante Início (01 ou 02)
+    has_start = any(n <= 2 for n in (selected_repeats + selected_absents))
     if not has_start:
-        # Busca candidatos válidos <= 3
-        cand_rep = [x for x in pool_repeats if x <= force_start_limit and x not in selected_repeats]
-        cand_abs = [x for x in pool_absents if x <= force_start_limit and x not in selected_absents]
-        
-        best_start = None
-        is_rep = False
-        
-        # Pega o melhor (maior peso RSI)
-        best_r = max(cand_rep, key=lambda x: weights.get(x, 0)) if cand_rep else None
-        best_a = max(cand_abs, key=lambda x: weights.get(x, 0)) if cand_abs else None
-        
-        if best_r and best_a:
-            if weights.get(best_r, 0) >= weights.get(best_a, 0): best_start = best_r; is_rep = True
-            else: best_start = best_a; is_rep = False
-        elif best_r: best_start = best_r; is_rep = True
-        elif best_a: best_start = best_a; is_rep = False
-            
-        if best_start:
-            if is_rep: selected_repeats.append(best_start)
+        # Tenta pegar 01 ou 02 dos pools disponíveis
+        start_candidates = [x for x in (pool_repeats + pool_absents) if x <= 2]
+        if start_candidates:
+            # Pega o melhor (maior peso RSI)
+            best_start = max(start_candidates, key=lambda x: weights.get(x, 0))
+            if best_start in pool_repeats: selected_repeats.append(best_start)
             else: selected_absents.append(best_start)
-    
+            
+    # Garante Fim (24 ou 25)
+    has_end = any(n >= 24 for n in (selected_repeats + selected_absents))
+    if not has_end:
+        # Tenta pegar 24 ou 25 dos pools
+        end_candidates = [x for x in (pool_repeats + pool_absents) if x >= 24]
+        if end_candidates:
+            best_end = max(end_candidates, key=lambda x: weights.get(x, 0))
+            if best_end in pool_repeats: selected_repeats.append(best_end)
+            else: selected_absents.append(best_end)
+
     # 3. Preenchimento Normal
     if len(selected_repeats) > target_repeats: target_repeats = len(selected_repeats)
     
@@ -177,39 +172,34 @@ def generate_game_sniper(
     
     final_game = sorted(selected_repeats + selected_absents)
     
-    # 4. CORREÇÃO DE SOMA (BALANCEAMENTO)
-    # Se a soma estourar > 210, trocamos o maior número não-obrigatório por um menor disponível
+    # 4. BALANCEAMENTO DE SOMA
     current_sum = sum(final_game)
     attempts = 0
-    
-    while current_sum > max_sum and attempts < 5:
-        # Pega o maior número do jogo que NÃO é obrigatório
-        candidates_to_remove = [x for x in final_game if x not in mandatory_nums]
-        if not candidates_to_remove: break # Se todos forem obrigatórios, não tem como trocar
-        
-        to_remove = max(candidates_to_remove)
-        
-        # Procura um substituto menor que NÃO está no jogo
-        # O substituto deve respeitar a classe (repetida ou ausente) se possível, para não quebrar a lógica
-        is_rep_removed = to_remove in last_draw
-        
-        potential_subs = []
-        if is_rep_removed:
-            potential_subs = [x for x in pool_repeats if x not in final_game and x < to_remove]
-        else:
-            potential_subs = [x for x in pool_absents if x not in final_game and x < to_remove]
+    while current_sum > max_sum and attempts < 10:
+        # Remove o maior não-obrigatório (mas CUIDADO para não remover 24 ou 25 se for o único fim)
+        candidates = [x for x in final_game if x not in mandatory_nums]
+        # Proteção da Âncora Final: Se só tem um >= 24, não remove ele.
+        anchors_end = [x for x in final_game if x >= 24]
+        if len(anchors_end) == 1:
+            candidates = [x for x in candidates if x != anchors_end[0]]
             
-        if potential_subs:
-            # Pega o menor possível para baixar a soma drasticamente
-            substitute = min(potential_subs)
-            
-            # Troca
+        if not candidates: break
+        
+        to_remove = max(candidates)
+        
+        # Busca substituto menor
+        is_rep = to_remove in last_draw
+        pool = pool_repeats if is_rep else pool_absents
+        subs = [x for x in pool if x not in final_game and x < to_remove]
+        
+        # Proteção da Âncora Inicial: Se vai remover algo, o substituto idealmente deve ser baixo
+        if subs:
             final_game.remove(to_remove)
-            final_game.append(substitute)
+            final_game.append(min(subs)) # Pega o menor possível para derrubar a soma
             final_game.sort()
             current_sum = sum(final_game)
         else:
-            break # Não achou substituto, para o loop
+            break
         attempts += 1
             
     return final_game, "Sucesso"
@@ -261,29 +251,29 @@ if df is not None:
     critical_all = [k for k,v in delays.items() if v >= 2]
     critical_all.sort(key=lambda x: delays[x], reverse=True)
     
-    st.title("LOTOQUANT SNIPER V10.1")
-    st.markdown(f"**CONCURSO:** {last_contest['id']} | **TRAVA INÍCIO:** RIGOROSA (01-03)")
+    st.title("LOTOQUANT V10.2 (ANCHOR LOCK)")
+    st.markdown(f"**CONCURSO:** {last_contest['id']} | **TRAVA DE PONTA:** (01/02 - 24/25)")
     
     c1, c2 = st.columns(2)
     c1.info(f"🚨 **ATRASADOS:** {critical_all}")
-    c2.success(f"🌐 **SOMA MÁXIMA:** 210 (Automática)")
+    c2.success(f"⚓ **ANCORAGEM:** Ativada nos 3 jogos.")
 
-    if st.button("GERAR CERCAMENTO PROFISSIONAL"):
+    if st.button("GERAR CERCAMENTO ANCORADO"):
         games_output = []
         
-        # --- JOGO 1: BASE FORTE ---
+        # --- JOGO 1 ---
         mandatories_g1 = set(cycle + critical_all[:4]) 
-        g1, msg1 = generate_game_sniper(
-            9, mandatories_g1, set(), last_draw_set, engine.universe, rsi_weights, force_start_limit=3, max_sum=210
+        g1, msg1 = generate_game_anchor(
+            9, mandatories_g1, set(), last_draw_set, engine.universe, rsi_weights
         )
         games_output.append({
             "Title": "JOGO 1: SNIPER (BASE)",
             "Game": g1, "Type": "ATAQUE",
-            "Reason": f"Obrigatórios: {sorted(list(mandatories_g1))}. Soma ajustada.",
+            "Reason": f"Base sólida. Início/Fim travados. {len(set(g1) & last_draw_set)} Repetidas.",
             "Special": mandatories_g1
         })
         
-        # --- JOGO 2: VARIAÇÃO ---
+        # --- JOGO 2 ---
         if len(critical_all) > 1:
             left_out_g2 = {critical_all[-1]} 
             mandatories_g2 = set(cycle + critical_all[:-1])
@@ -294,17 +284,17 @@ if df is not None:
         fillers_g1 = [x for x in g1 if x not in mandatories_g1]
         banned_for_g2 = set(fillers_g1[:4])
         
-        g2, msg2 = generate_game_sniper(
-            10, mandatories_g2, banned_for_g2, last_draw_set, engine.universe, rsi_weights, force_start_limit=3, max_sum=210
+        g2, msg2 = generate_game_anchor(
+            10, mandatories_g2, banned_for_g2, last_draw_set, engine.universe, rsi_weights
         )
         games_output.append({
             "Title": "JOGO 2: TENDÊNCIA",
             "Game": g2, "Type": "VARIAÇÃO",
-            "Reason": f"Deixou o {list(left_out_g2)} de fora. Soma ajustada.",
+            "Reason": f"Variação forçada. Início/Fim travados. {len(set(g2) & last_draw_set)} Repetidas.",
             "Special": mandatories_g2
         })
 
-        # --- JOGO 3: RESGATE (O CORRETOR) ---
+        # --- JOGO 3 ---
         used_numbers = set(g1) | set(g2)
         forgotten_numbers = engine.universe - used_numbers
         dropped_criticals = left_out_g2
@@ -312,16 +302,16 @@ if df is not None:
         mandatories_g3 = forgotten_numbers | dropped_criticals
         banned_g3 = set(critical_all) - mandatories_g3
         
-        g3, msg3 = generate_game_sniper(
-            8, mandatories_g3, banned_g3, last_draw_set, engine.universe, rsi_weights, force_start_limit=3, max_sum=210
+        g3, msg3 = generate_game_anchor(
+            8, mandatories_g3, banned_g3, last_draw_set, engine.universe, rsi_weights
         )
         
         if not g3:
-            g3, msg3 = generate_game_sniper(
-                8, mandatories_g3, set(), last_draw_set, engine.universe, rsi_weights, force_start_limit=3, max_sum=210
+            g3, msg3 = generate_game_anchor(
+                8, mandatories_g3, set(), last_draw_set, engine.universe, rsi_weights
             )
             
-        reason_txt = f"🌐 CERCAMENTO: Resgatou {sorted(list(forgotten_numbers))} e o crítico {list(dropped_criticals)}."
+        reason_txt = f"🌐 CERCAMENTO: Resgatou {sorted(list(forgotten_numbers))}. Pontas garantidas."
 
         games_output.append({
             "Title": "JOGO 3: RESGATE (ZEBRA)",
@@ -375,7 +365,7 @@ if df is not None:
                     html += f"<div class='ball {css}'>{n:02d}</div>"
                 st.markdown(f"<div class='ball-grid'>{html}</div></div>", unsafe_allow_html=True)
 
-        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v101.txt")
+        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v102.txt")
 
 else:
     st.error("Erro de conexão. Tente recarregar.")
