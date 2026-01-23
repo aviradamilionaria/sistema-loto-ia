@@ -8,8 +8,8 @@ from typing import List, Set, Dict, Tuple, Optional
 
 # --- 1. CONFIGURAÇÃO SYSTEM KERNEL ---
 st.set_page_config(
-    page_title="LotoQuant | ELITE V20.0",
-    page_icon="💎",
+    page_title="LotoQuant | TRIANGULATOR V21.0",
+    page_icon="📐",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -48,6 +48,14 @@ st.markdown("""
     .win-11 { border-left-color: #e69138; }
     .win-12 { border-left-color: #f1c232; }
     .win-13 { border-left-color: #00ff00; box-shadow: 0 0 10px #00ff0033; }
+
+    /* Tabela Atrasados */
+    .atraso-card {
+        background: #161b22; border: 1px solid #30363d; padding: 10px; 
+        text-align: center; border-radius: 5px; margin-bottom: 5px;
+    }
+    .atraso-num { font-size: 18px; font-weight: bold; color: #ff4b4b; }
+    .atraso-val { font-size: 12px; color: #8b949e; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -112,13 +120,14 @@ class LotoEngine:
             weights[num] = count * 10 
         return weights
 
-# --- 4. THE VALIDATOR (V20 - OPENING ELITE) ---
-def validate_game_elite(
+# --- 4. THE VALIDATOR (V21 - TRIANGULATION) ---
+def validate_game_triangulation(
     game: List[int], 
     engine: LotoEngine, 
     target_odd: int, 
     strict_sum: bool = True,
-    opening_level: int = 1 # 1=Ouro(J1), 2=Prata(J2), 3=Bronze(J3)
+    opening_level: int = 1,
+    forbidden_patterns: List[Tuple[int, int]] = [] # NOVO: Proíbe repetição de pontas
 ) -> Tuple[bool, str]:
     
     g_set = set(game)
@@ -127,43 +136,37 @@ def validate_game_elite(
     report = ""
     valid = True
     
-    # 1. HIERARQUIA DE ABERTURA (V20)
+    # 0. CHECAGEM DE TRIANGULAÇÃO (NOVO)
+    current_pattern = (game[0], game[-1])
+    if current_pattern in forbidden_patterns:
+        return False, f"Estrutura: {current_pattern} já usada no J1 ou J2. Buscando diversificação... ❌"
+
+    # 1. HIERARQUIA DE ABERTURA
     start_ok = False
     start_msg = "❌"
-    
     pair = (game[0], game[1])
     
-    # NÍVEL 1: JOGO 1 (Apenas a Elite Absoluta)
-    if opening_level == 1:
+    if opening_level == 1: # J1
         if pair == (1, 2): start_msg = "✅ (Ouro)"; start_ok = True
         elif pair == (1, 3): start_msg = "✅ (Prata)"; start_ok = True
-        else: start_msg = "❌ (Exige 01-02 ou 01-03)"; start_ok = False
+        else: start_msg = "❌ (Exige 01-02/01-03)"; start_ok = False
         
-    # NÍVEL 2: JOGO 2 (Elite + Alternativas Fortes)
-    elif opening_level == 2:
-        if pair == (1, 2): start_msg = "✅ (Ouro)"; start_ok = True
-        elif pair == (1, 3): start_msg = "✅ (Prata)"; start_ok = True
-        elif pair == (2, 3): start_msg = "✅ (Bronze)"; start_ok = True
-        elif pair == (2, 4): start_msg = "✅ (Aço)"; start_ok = True
-        # 01-04 AGORA É PROIBIDO NO NÍVEL 2
+    elif opening_level == 2: # J2
+        if pair in [(1,2), (1,3), (2,3), (2,4)]: start_msg = "✅ (Elite/Variação)"; start_ok = True
         elif pair == (1, 4): start_msg = "❌ (Fraco: 01-04)"; start_ok = False 
         else: start_msg = f"❌ (Fraco: {pair})"; start_ok = False
         
-    # NÍVEL 3: JOGO 3 (Zebra/Resgate - Aceita tudo que não for buraco absurdo)
-    else: 
-        if pair in [(1,2), (1,3), (1,4), (2,3), (2,4), (3,4)]:
-            start_msg = "✅ (Válido Zebra)"; start_ok = True
-        else:
-            # Só rejeita se o buraco for > 3
-            if game[1] - game[0] > 3: start_msg = "❌ (Buraco Grande)"; start_ok = False
-            else: start_msg = "⚠️ (Resgate)"; start_ok = True
+    else: # J3 (Zebra)
+        # Zebra aceita tudo que não for buraco > 3
+        if game[1] - game[0] > 3: start_msg = "❌ (Buraco Grande)"; start_ok = False
+        else: start_msg = "⚠️ (Resgate/Zebra)"; start_ok = True
 
     end_ok = game[-1] >= 24
     
     if start_ok and end_ok:
-        report += f"Abertura: {game[0]:02d}-{game[1]:02d} {start_msg}\nFechamento: {game[-1]:02d} ✅\n"
+        report += f"Ponta: {game[0]:02d}...{game[-1]:02d} ✅ (Inédita/Elite)\n"
     else:
-        report += f"Estrutura: {game[0]}-{game[1]}...{game[-1]} {start_msg}\n"
+        report += f"Estrutura: {game[0]}...{game[-1]} {start_msg}\n"
         valid = False
 
     # 2. Ímpares
@@ -201,8 +204,8 @@ def validate_game_elite(
     
     return valid, report
 
-# --- 5. GENERATOR ---
-def generate_elite_game(
+# --- 5. GENERATOR (TRIANGULATION) ---
+def generate_triangulation_game(
     target_repeats: int, 
     mandatory_nums: Set[int], 
     banned_nums: Set[int],
@@ -211,6 +214,7 @@ def generate_elite_game(
     target_odd_count: int, 
     strict_sum_rule: bool = True,
     opening_level: int = 1,
+    forbidden_patterns: List[Tuple[int, int]] = [],
     max_attempts: int = 15000
 ) -> Tuple[List[int], str, str]:
     
@@ -221,7 +225,7 @@ def generate_elite_game(
         sel_rep = list(mandatory_nums.intersection(last_draw))
         sel_abs = list(mandatory_nums.intersection(universe - last_draw))
         
-        # Limpeza de Pool Anti-Duplicidade
+        # Correção Anti-Duplicidade
         pool_repeats = list(last_draw - banned_nums - set(sel_rep))
         pool_absents = list((universe - last_draw) - banned_nums - set(sel_abs))
         
@@ -247,9 +251,9 @@ def generate_elite_game(
         candidate = sorted(sel_rep + sel_abs)
         if len(set(candidate)) != 15: continue
         
-        # TRIBUNAL ELITE
-        is_valid, report = validate_game_elite(
-            candidate, engine, target_odd_count, strict_sum_rule, opening_level
+        # TRIBUNAL
+        is_valid, report = validate_game_triangulation(
+            candidate, engine, target_odd_count, strict_sum_rule, opening_level, forbidden_patterns
         )
         
         if is_valid:
@@ -268,27 +272,26 @@ if df is not None:
     rsi_weights = engine.get_rsi_score()
     last_contest = df.iloc[-1]
     
-    # SIDEBAR
+    # CONFERIDOR
     st.sidebar.title("🧾 CONFERIDOR")
     st.sidebar.markdown(f"**Base:** Concurso {last_contest['id']}")
     uploaded_file = st.sidebar.file_uploader("Carregar .txt", type="txt")
     manual_input = st.sidebar.text_area("Colar jogos:", height=150)
-    
-    games_to_check = []
-    if uploaded_file:
-        stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
-        for line in stringio:
-            nums = [int(n) for n in re.findall(r'\d+', line)][:15]
-            if len(nums) == 15: games_to_check.append(nums)
-    elif manual_input:
-        lines = manual_input.strip().split('\n')
-        for line in lines:
-            nums = [int(n) for n in re.findall(r'\d+', line)][:15]
-            if len(nums) == 15: games_to_check.append(nums)
-            
-    if games_to_check:
-        st.sidebar.markdown("---")
+    if uploaded_file or manual_input:
+        games_to_check = []
+        if uploaded_file:
+            stringio = StringIO(uploaded_file.getvalue().decode("utf-8"))
+            for line in stringio:
+                nums = [int(n) for n in re.findall(r'\d+', line)][:15]
+                if len(nums) == 15: games_to_check.append(nums)
+        elif manual_input:
+            lines = manual_input.strip().split('\n')
+            for line in lines:
+                nums = [int(n) for n in re.findall(r'\d+', line)][:15]
+                if len(nums) == 15: games_to_check.append(nums)
+        
         total_prize = 0
+        st.sidebar.markdown("---")
         for i, game in enumerate(games_to_check):
             hits = len(set(game) & set(last_contest['draw']))
             css_class = ""
@@ -298,95 +301,103 @@ if df is not None:
             if hits >= 13: css_class="win-13"; money=30
             total_prize += money
             st.sidebar.markdown(f"<div class='result-box {css_class}'>Jogo {i+1}: <b style='color:#fff'>{hits} Pts</b></div>", unsafe_allow_html=True)
-        
-        if total_prize > 0: st.sidebar.success(f"💰 PRÊMIO TOTAL: R$ {total_prize},00")
-        else: st.sidebar.warning("Nenhum prêmio identificado.")
+        if total_prize > 0: st.sidebar.success(f"💰 PRÊMIO: R$ {total_prize},00")
+        else: st.sidebar.warning("Sem prêmio.")
 
     # MAIN SCREEN
+    st.title("LOTOQUANT TRIANGULATOR V21.0")
+    st.markdown(f"**CONCURSO:** {last_contest['id']} | **TRIANGULAÇÃO:** PONTAS DIVERSIFICADAS")
+
+    # PAINEL TÁTICO DE ATRASADOS (NOVO)
     critical_all = [k for k,v in delays.items() if v >= 2]
     critical_all.sort(key=lambda x: delays[x], reverse=True)
     
-    if len(critical_all) >= 4:
-        squad_a = critical_all[:2]
-        squad_b = critical_all[2:4]
-    elif len(critical_all) >= 2:
-        squad_a = [critical_all[0]]
-        squad_b = [critical_all[1]]
-    else:
-        squad_a = critical_all
-        squad_b = critical_all
-    
-    st.title("LOTOQUANT ELITE V20.0")
-    st.markdown(f"**CONCURSO:** {last_contest['id']} | **ABERTURA:** HIERARQUIA REFINADA")
-    
-    c1, c2, c3 = st.columns(3)
-    c1.success(f"🦅 **J1:** Ouro (01-02/03)")
-    c2.info(f"🌊 **J2:** Prata/Bronze (Sem 01-04)")
-    c3.warning(f"🛡️ **J3:** Resgate (Livre)")
+    st.markdown("### 🚦 PAINEL DE ATRASO CRÍTICO")
+    cols = st.columns(8) # Grid para os atrasados
+    for i, num in enumerate(critical_all):
+        col = cols[i % 8]
+        with col:
+            st.markdown(f"""
+            <div class='atraso-card'>
+                <div class='atraso-num'>{num:02d}</div>
+                <div class='atraso-val'>{delays[num]} Jogos</div>
+            </div>
+            """, unsafe_allow_html=True)
 
-    if st.button("GERAR COM ABERTURA DE ELITE"):
+    if len(critical_all) >= 4:
+        squad_a = critical_all[:2]; squad_b = critical_all[2:4]
+    elif len(critical_all) >= 2:
+        squad_a = [critical_all[0]]; squad_b = [critical_all[1]]
+    else:
+        squad_a = critical_all; squad_b = critical_all
+    
+    if st.button("GERAR COM TRIANGULAÇÃO"):
         games_output = []
+        used_patterns = [] # Armazena (Inicio, Fim)
         progress_bar = st.progress(0)
         
-        # --- JOGO 1 (Opening Level 1 - OURO) ---
+        # --- JOGO 1 ---
         mandatories_g1 = set(cycle + critical_all)
-        g1, status1, report1 = generate_elite_game(
+        g1, status1, report1 = generate_triangulation_game(
             9, mandatories_g1, set(), engine, rsi_weights, target_odd_count=8, 
-            opening_level=1 # Só aceita 01-02 ou 01-03
+            opening_level=1, forbidden_patterns=[]
         )
         if g1:
+            used_patterns.append((g1[0], g1[-1]))
             games_output.append({
                 "Title": "JOGO 1: SNIPER (OURO)", "Game": g1, 
                 "Reason": "Força Máxima.", "Report": report1, "Special": mandatories_g1
             })
         progress_bar.progress(33)
         
-        # --- JOGO 2 (Opening Level 2 - PRATA/BRONZE) ---
+        # --- JOGO 2 ---
         mandatories_g2 = set(cycle + squad_a)
         fillers_g1 = [x for x in g1 if x not in mandatories_g1]
         banned_g2 = set(squad_b) | set(fillers_g1[:3])
         
-        g2, status2, report2 = generate_elite_game(
+        g2, status2, report2 = generate_triangulation_game(
             10, mandatories_g2, banned_g2, engine, rsi_weights, target_odd_count=8,
-            opening_level=2 # Aceita 01-02, 01-03, 02-03, 02-04. REJEITA 01-04.
+            opening_level=2, forbidden_patterns=used_patterns
         )
         
+        # Fallback
         if not g2:
-             g2, status2, report2 = generate_elite_game(
+             g2, status2, report2 = generate_triangulation_game(
                 10, mandatories_g2, set(squad_b), engine, rsi_weights, target_odd_count=8,
-                opening_level=2
+                opening_level=2, forbidden_patterns=used_patterns
             )
-             report2 += "\n🛡️ Persistência: Banimento relaxado."
 
         if g2:
+            used_patterns.append((g2[0], g2[-1]))
             games_output.append({
                 "Title": "JOGO 2: TENDÊNCIA (PRATA)", "Game": g2, 
-                "Reason": "Variação s/ Abertura Fraca.", "Report": report2, "Special": mandatories_g2
+                "Reason": "Variação Controlada.", "Report": report2, "Special": mandatories_g2
             })
         progress_bar.progress(66)
 
-        # --- JOGO 3 (Opening Level 3 - ZEBRA) ---
+        # --- JOGO 3 (TRIANGULAÇÃO) ---
         used_numbers = set(g1) | set(g2)
         forgotten_numbers = engine.universe - used_numbers
         mandatories_g3 = set(squad_b) | forgotten_numbers
         banned_g3 = set(squad_a)
         
-        g3, status3, report3 = generate_elite_game(
+        # Jogo 3 recebe a lista de padrões proibidos (Ex: se J1 foi 1-25 e J2 foi 2-24, J3 NÃO PODE REPETIR)
+        g3, status3, report3 = generate_triangulation_game(
             8, mandatories_g3, banned_g3, engine, rsi_weights, target_odd_count=7, 
-            strict_sum_rule=False, opening_level=3 # Aceita qualquer coisa que não seja buraco > 3
+            strict_sum_rule=False, opening_level=3, forbidden_patterns=used_patterns
         )
         
         if not g3:
-             g3, status3, report3 = generate_elite_game(
+             g3, status3, report3 = generate_triangulation_game(
                 8, mandatories_g3, set(), engine, rsi_weights, target_odd_count=7, 
-                strict_sum_rule=False, opening_level=3
+                strict_sum_rule=False, opening_level=3, forbidden_patterns=[]
             )
 
         if g3:
             report3 += f"\n🔗 Resgate: {len(forgotten_numbers)} números."
             games_output.append({
-                "Title": "JOGO 3: RESGATE (SQUAD B)", "Game": g3, 
-                "Reason": "Zebra Controlada.", "Report": report3, 
+                "Title": "JOGO 3: RESGATE (ZEBRA)", "Game": g3, 
+                "Reason": "Zebra com Triangulação.", "Report": report3, 
                 "Special": set(squad_b), "Forgotten": forgotten_numbers 
             })
         progress_bar.progress(100)
@@ -406,7 +417,7 @@ if df is not None:
                 <div class='game-card'>
                     <div class='card-header'>
                         <span style='color:#fff; font-weight:bold'>{g_data['Title']}</span>
-                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V20.0</span>
+                        <span style='background:#333; padding:2px 8px; border-radius:4px; font-size:12px'>V21.0</span>
                     </div>
                 """, unsafe_allow_html=True)
                 
@@ -425,7 +436,7 @@ if df is not None:
                 
                 txt_download += g_data['Report'].replace("✅", "[OK]").replace("❌", "[ERRO]").replace("⚠️", "[ALERTA]") + "\n" + "-"*30 + "\n"
 
-        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v20.txt")
+        st.download_button("💾 BAIXAR JOGOS (.TXT)", txt_download, "lotoquant_v21.txt")
 
 else:
     st.error("Erro de conexão. Tente recarregar.")
